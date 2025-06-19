@@ -46,6 +46,14 @@ import com.slavabarkov.tidy.adapters.ImageItemDetailsLookup
 import com.slavabarkov.tidy.adapters.ImageItemKeyProvider
 import java.io.File
 import android.provider.DocumentsContract
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.Spannable
+import android.text.style.StyleSpan
+import android.graphics.Typeface
+import android.view.Menu
+import android.view.MenuInflater
+import android.view.MenuItem
 import android.widget.CheckBox
 import android.widget.ProgressBar
 import androidx.activity.result.IntentSenderRequest
@@ -55,7 +63,9 @@ import kotlinx.coroutines.launch
 import androidx.activity.result.ActivityResultLauncher
 import androidx.appcompat.app.AlertDialog
 import androidx.core.net.toUri
+import androidx.core.view.MenuProvider
 import androidx.documentfile.provider.DocumentFile
+import androidx.navigation.fragment.findNavController
 import com.slavabarkov.tidy.data.ImageEmbedding
 import kotlinx.coroutines.withContext
 
@@ -121,21 +131,30 @@ class SearchFragment : Fragment() {
         }
 
         deleteResultLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-            val idsSuccessfullyProcessed = pendingDeleteIds // Get the IDs we were working on
+            val idsSuccessfullyProcessed = pendingDeleteIds!! // Get the IDs we were working on
             pendingDeleteIds = null // Clear the temporary list immediately
             if (result.resultCode == Activity.RESULT_OK) {
                 Log.d("SearchFragment", "Delete/Trash permission granted via IntentSender.")
+                val currentSearchResults = mSearchViewModel.searchResults ?: emptyList()
+                val remainingIds = currentSearchResults.filter { it !in idsSuccessfullyProcessed }
+                mSearchViewModel.searchResults = remainingIds
+
+                // Delete from ViewModel/database
+                lifecycleScope.launch(Dispatchers.IO) {
+                    mORTImageViewModel.deleteEmbeddingsByInternalId(idsSuccessfullyProcessed)
+                }
                 // On API 30+, this means the trash request was confirmed.
                 // On API 29, this means permission for a specific item was granted.
                 // We need to re-initiate the deletion for the granted item(s) or inform the user.
                 // A simple approach is to inform the user and let them press delete again.
-                Toast.makeText(context, "Permission granted. Please try the delete operation again.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "File(s) successfully moved to trash.", Toast.LENGTH_SHORT).show()
+                updateAdapterAfterModification(idsSuccessfullyProcessed, emptyList())
                 // More complex: Re-trigger initiateMediaStoreDeletion(idsSuccessfullyProcessed) if needed.
             } else {
                 Log.w("SearchFragment", "Delete/Trash permission denied via IntentSender.")
                 Toast.makeText(context, "Operation cancelled or permission denied.", Toast.LENGTH_SHORT).show()
                 // Ensure UI reflects that deletion didn't happen (e.g., selection remains)
-                // updateAdapterAfterModification(emptyList(), idsSuccessfullyProcessed ?: emptyList()) // Mark original items as failed?
+                updateAdapterAfterModification(emptyList(), idsSuccessfullyProcessed ?: emptyList()) // Mark original items as failed?
             }
         }
 
@@ -147,6 +166,7 @@ class SearchFragment : Fragment() {
 
             if (result.resultCode == Activity.RESULT_OK && itemsToProcess != null && destinationUri != null) {
                 Log.d("SearchFragment", "MediaStore write/move permission granted via IntentSender for ${itemsToProcess.size} items.")
+                operationProgressText?.visibility  = View.VISIBLE
                 performMediaStoreMove(itemsToProcess, destinationUri)
             } else {
                 Log.w("SearchFragment", "MediaStore write/move permission denied or state error.")
@@ -280,7 +300,7 @@ class SearchFragment : Fragment() {
         // 2. Find the TextView in onCreateView or onViewCreated
         operationProgressText = view.findViewById(R.id.operationProgressText)
         selectAllCheckbox = view.findViewById(R.id.selectAllCheckbox)
-
+        //operationProgressBar?.max = 100
         // --- START: Reverted Data Initialization ---
         // Initialize searchResults ONLY if it's null in the ViewModel.
         // This preserves the existing list (e.g., search results) when the view is recreated.
@@ -388,6 +408,27 @@ class SearchFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         Log.d("LifecycleDebug", "onViewCreated called")
+
+        requireActivity().addMenuProvider(object : MenuProvider {
+            override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
+                menuInflater.inflate(R.menu.search_fragment_menu, menu)
+
+                // Hide Recycle Bin for API < 30
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    menu.findItem(R.id.menu_recycle_bin)?.isVisible = false
+                }
+            }
+
+            override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
+                return when (menuItem.itemId) {
+                    R.id.menu_recycle_bin -> {
+                        findNavController().navigate(R.id.recycleBinFragment)
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }, viewLifecycleOwner)
 
         // Request permissions when the view is created or becomes visible
         setupPermissionChecksAndButtons()
@@ -750,6 +791,10 @@ class SearchFragment : Fragment() {
     // --- Function to perform the actual MediaStore move (called after permission granted) ---
     private fun performMediaStoreMove(itemsToMove: List<Pair<Uri, Long>>, destinationFolderUri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                operationProgressText?.visibility = View.VISIBLE
+                operationProgressText?.text = "0%"
+            }
             val successfullyMovedIds = mutableListOf<Long>()
             val failedIds = mutableListOf<Long>()
             val contentResolver = requireContext().contentResolver
@@ -814,11 +859,14 @@ class SearchFragment : Fragment() {
                     Log.e("SearchFragment", "Cannot write to destination folder for copy/delete fallback.")
                     failedIds.addAll(itemsToMove.map { it.second }) // Mark all as failed
                 } else {
-                    itemsToMove.forEach { (sourceUri, internalId) ->
-                        if (copyAndDeleteSaf(sourceUri, destinationFolderUri, contentResolver)) {
+                    itemsToMove.forEachIndexed { index, (sourceUri, internalId) -> if (copyAndDeleteSaf(sourceUri, destinationFolderUri, contentResolver)) {
                             successfullyMovedIds.add(internalId)
                         } else {
                             failedIds.add(internalId)
+                        }
+                        withContext(Dispatchers.Main) {
+                            val progressPercentage = (((index + 1).toDouble() / itemsToMove.size) * 100).toInt()
+                            operationProgressText?.text = "$progressPercentage%"
                         }
                     }
                 }
@@ -855,13 +903,22 @@ class SearchFragment : Fragment() {
 
         // Handle potential name collisions
         var targetFileName = sourceFileName!!
-        var counter = 1
-        while (destinationDir.findFile(targetFileName)?.exists() == true) {
-            val nameWithoutExtension = sourceFileName!!.substringBeforeLast('.', sourceFileName!!)
-            val extension = sourceFileName!!.substringAfterLast('.', "")
-            targetFileName = if (extension.isNotEmpty()) "${nameWithoutExtension}_${counter}.${extension}" else "${nameWithoutExtension}_${counter}"
-            counter++
-        }
+ //This code is suppose to validate if a duplicate file exists , if yes then rename the file (faster version)
+//        val existingNames = destinationDir.listFiles().mapNotNull { it.name }.toHashSet()
+//        var counter = 1
+//        while(existingNames.contains(targetFileName)) {
+//            val nameWithoutExtension = sourceFileName!!.substringBeforeLast('.', sourceFileName!!)
+//            val extension = sourceFileName!!.substringAfterLast('.', "")
+//            targetFileName = if (extension.isNotEmpty()) "${nameWithoutExtension}_${counter}.${extension}" else "${nameWithoutExtension}_${counter}"
+//            counter++
+//        }
+        //This code is suppose to validate if a duplicate file exists , if yes then rename the file (slower version)
+//        while (destinationDir.findFile(targetFileName)?.exists() == true) {
+//            val nameWithoutExtension = sourceFileName!!.substringBeforeLast('.', sourceFileName!!)
+//            val extension = sourceFileName!!.substringAfterLast('.', "")
+//            targetFileName = if (extension.isNotEmpty()) "${nameWithoutExtension}_${counter}.${extension}" else "${nameWithoutExtension}_${counter}"
+//            counter++
+//        }
 
         // Determine MIME type
         val mimeType = contentResolver.getType(sourceUri) ?: "application/octet-stream"
@@ -870,15 +927,23 @@ class SearchFragment : Fragment() {
         val copiedFile = destinationDir.createFile(mimeType, targetFileName) ?: return false
 
         // Perform copy
+        val fileStart = System.currentTimeMillis()
         var success = false
         try {
-            contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                contentResolver.openOutputStream(copiedFile.uri)?.use { outputStream ->
-                    inputStream.copyTo(outputStream); success = true
+            contentResolver.openInputStream(sourceUri)?.buffered(32 * 1024)?.use { inputStream ->
+                contentResolver.openOutputStream(copiedFile.uri)?.buffered(32 * 1024)?.use { outputStream ->
+                    inputStream.copyTo(outputStream, bufferSize = 32 * 1024);
+                    success = true
                 }
             }
+
+            val fileEnd = System.currentTimeMillis()
+            Log.d("FileCopyTiming", "Copied file in ${fileEnd - fileStart} ms")
+            Log.d("FileCopyTiming", "Copied ${copiedFile.name} (${copiedFile.length()} bytes) in ${fileEnd - fileStart} ms")
+
             if (success) {
                 // Delete original AFTER successful copy
+                val deleteStart = System.currentTimeMillis()
                 val deleted = try {
                     // Use appropriate delete method based on URI type
                     if (DocumentsContract.isDocumentUri(requireContext(), sourceUri)) {
@@ -890,6 +955,8 @@ class SearchFragment : Fragment() {
                     Log.e("SearchFragment", "Exception deleting original $sourceUri after copy", delEx)
                     false
                 }
+                val deleteEnd = System.currentTimeMillis()
+                Log.d("DeleteTiming", "Deleted in ${deleteEnd - deleteStart} ms (success=$deleted)")
 
                 if (!deleted) {
                     Log.w("SearchFragment", "Failed to delete original $sourceUri after copy.")
@@ -913,6 +980,7 @@ class SearchFragment : Fragment() {
     // --- Placeholder for handling completion ---
     private fun handleMoveCompletion(movedInternalIds: List<Long>, failedInternalIds: List<Long>) {
         mSearchViewModel.setUiOperationInProgress(false)
+        operationProgressText?.visibility = View.GONE
         // --- 1. Update Database/ViewModel ---
         if (movedInternalIds.isNotEmpty()) {
             lifecycleScope.launch(Dispatchers.IO) {
@@ -988,6 +1056,7 @@ class SearchFragment : Fragment() {
             // more precisely where each specific operation (MediaStore move, DocFile move, Delete) concludes.
             if (mSearchViewModel.uiOperationInProgress.value == true) {
                 Log.d("SearchFragment", "updateAdapterAfterModification: Resetting UI operation flag as a fallback.")
+                operationProgressText?.visibility = View.GONE
                 mSearchViewModel.setUiOperationInProgress(false)
             }
             // --- END: Ensure UI operation state is reset ---
@@ -1053,22 +1122,66 @@ class SearchFragment : Fragment() {
     // Show alert dialog before deletion
     private fun showDeleteConfirmationDialog(selectedIdsInternal: List<Long>) {
         val itemCount = selectedIdsInternal.size
-        val message = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            "Are you sure you want to move $itemCount selected image(s) to the trash?"
-        } else {
-            "Are you sure you want to permanently delete $itemCount selected image(s)? This action cannot be undone."
+        val embeddings = getEmbeddingsForIds(selectedIdsInternal)
+        val firstUri = embeddings.firstNotNullOfOrNull { determineUriFromEmbedding(it) }
+        val isMediaStoreUri = firstUri?.authority == MediaStore.AUTHORITY
+        val isDocumentUri = firstUri?.let { DocumentsContract.isDocumentUri(requireContext(), it) } == true
+        if(embeddings.isEmpty()) {
+            Log.w("SearchFragment", "Could not find embedding data for selected internal IDs: $selectedIdsInternal")
+            operationProgressText?.visibility = View.GONE
+            Toast.makeText(context, "Error finding items to delete.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val message = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && isMediaStoreUri -> {
+                "Are you sure you want to move $itemCount selected image(s) to the trash?"
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && isDocumentUri -> {
+                "Note: You are deleting files from a specific folder. These will be permanently deleted even on Android 11+.\n\n" +
+                        "Are you sure you want to delete $itemCount selected image(s)?"
+            }
+            else -> {
+                "Are you sure you want to permanently delete $itemCount selected image(s)? This action cannot be undone."
+            }
+            }
+
+        val spannableMessage = SpannableString(message)
+        val highlightPhrase = "permanently deleted"
+        val startIndex = message.indexOf(highlightPhrase, ignoreCase = true)
+        val isDarkTheme = (resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+        val redColor = if (isDarkTheme)
+            ContextCompat.getColor(requireContext(), android.R.color.holo_orange_light)
+        else
+            ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
+
+        if (startIndex >= 0) {
+            val endIndex = startIndex + highlightPhrase.length
+            spannableMessage.setSpan(
+                ForegroundColorSpan(redColor),
+                startIndex, endIndex,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            spannableMessage.setSpan(
+                StyleSpan(Typeface.BOLD),
+                startIndex, endIndex,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
         }
 
         AlertDialog.Builder(requireContext())
             .setTitle("Confirm Deletion")
-            .setMessage(message)
+            .setMessage(spannableMessage)
             .setPositiveButton("Delete") { dialog, which ->
                 Log.d("SearchFragment", "User confirmed deletion for $itemCount items.")
                 // --- START: Set UI operation in progress ---
                 mSearchViewModel.setUiOperationInProgress(true)
                 operationProgressText?.visibility = View.VISIBLE
                 // --- END: Set UI operation in progress ---
-                initiateMediaStoreDeletion(selectedIdsInternal)
+                initiateMediaStoreDeletion(embeddings)
             }
             .setNegativeButton("Cancel") { dialog, which ->
                 Log.d("SearchFragment", "User cancelled deletion.")
@@ -1077,19 +1190,14 @@ class SearchFragment : Fragment() {
             .show()
     }
 
-    private fun initiateMediaStoreDeletion(selectedInternalIds: List<Long>) {
+    private fun initiateMediaStoreDeletion(embeddingsToDelete: List<ImageEmbedding>) {
+        val selectedInternalIds = embeddingsToDelete.map { it.internalId }
         if (selectedInternalIds.isEmpty()){
             mSearchViewModel.setUiOperationInProgress(false) // Reset if no items
+            operationProgressText?.visibility = View.GONE
             return }
 
         val contentResolver = requireContext().contentResolver
-        val embeddingsToDelete = getEmbeddingsForIds(selectedInternalIds)
-        if (embeddingsToDelete.isEmpty()) {
-            Log.w("SearchFragment", "Could not find embedding data for selected internal IDs: $selectedInternalIds")
-            operationProgressText?.visibility = View.GONE
-            Toast.makeText(context, "Error finding items to delete.", Toast.LENGTH_SHORT).show()
-            return
-        }
 
         val urisAndIdsToDelete = embeddingsToDelete.mapNotNull { embedding ->
             determineUriFromEmbedding(embedding)?.let { Pair(it, embedding.internalId) }
@@ -1103,9 +1211,9 @@ class SearchFragment : Fragment() {
 
         val urisOnly = urisAndIdsToDelete.map { it.first }
         pendingDeleteIds = urisAndIdsToDelete.map { it.second } // Store IDs for potential callback
-
+        val firstUri = urisOnly.firstOrNull()
         when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && firstUri?.authority == MediaStore.AUTHORITY -> {
                 try {
                     val pendingIntent = MediaStore.createTrashRequest(contentResolver, urisOnly, true)
                     val intentSenderRequest = IntentSenderRequest.Builder(pendingIntent).build()

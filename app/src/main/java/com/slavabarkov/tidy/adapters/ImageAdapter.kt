@@ -7,6 +7,7 @@ package com.slavabarkov.tidy.adapters
 import android.annotation.SuppressLint
 import android.content.ContentUris
 import android.content.Context
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -18,6 +19,7 @@ import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.net.toUri
 import androidx.navigation.findNavController
@@ -29,7 +31,7 @@ import com.slavabarkov.tidy.data.ImageEmbedding
 
 
 // Changed constructor to accept List<ImageEmbedding>
-class ImageAdapter(private val context: Context, initialDataset: List<ImageEmbedding>) :
+class ImageAdapter(private val context: Context, initialDataset: List<ImageEmbedding>,private val onItemClick: ((ImageEmbedding) -> Unit)? = null) :
     RecyclerView.Adapter<ImageAdapter.ImageViewHolder>() {
     private var dataset: List<ImageEmbedding> = initialDataset
 
@@ -52,6 +54,7 @@ class ImageAdapter(private val context: Context, initialDataset: List<ImageEmbed
         val imageView: ImageView = view.findViewById(R.id.item_image)
         val checkBox: CheckBox = view.findViewById(R.id.imageCheckbox)
         val enlargeButton: ImageButton = view.findViewById(R.id.enlarge_button)
+        val textDaysLeft: TextView = view.findViewById(R.id.textDaysLeft)
     }
 
 override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHolder {
@@ -145,6 +148,21 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
         val isSelected = selectionTracker.isSelected(itemInternalId)
         holder.itemView.isActivated = isSelected
         holder.checkBox.isChecked = isSelected
+
+        if (itemEmbedding.expiresAt != null) {
+            val daysLeft = ((itemEmbedding.expiresAt!! - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).coerceAtLeast(0)
+            holder.textDaysLeft.apply {
+                text = "Expires in $daysLeft day${if (daysLeft != 1L) "s" else ""}"
+                setBackgroundColor(
+                    if (daysLeft <= 3) Color.parseColor("#D32F2F") // red
+                    else Color.parseColor("#99000000")
+                )
+                visibility = View.VISIBLE
+            }
+        } else {
+            holder.textDaysLeft.visibility = View.GONE
+        }
+
         // Define the navigation logic (can use explicit label for early return)
         // Define the navigation logic with detailed logs
         // Define the navigation logic lambda (adapted from your original)

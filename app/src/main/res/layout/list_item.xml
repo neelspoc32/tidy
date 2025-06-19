@@ -16,6 +16,20 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <TextView
+        android:id="@+id/textDaysLeft"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Expires in X days"
+        android:textSize="12sp"
+        android:textColor="@android:color/white"
+        android:background="#99000000"
+        android:padding="4dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/item_image"
+        app:layout_constraintStart_toStartOf="@id/item_image"
+        android:layout_margin="6dp" />
+
     <CheckBox
         android:id="@+id/imageCheckbox"
         android:layout_width="wrap_content"

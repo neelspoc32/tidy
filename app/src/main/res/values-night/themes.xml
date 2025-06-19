@@ -11,5 +11,6 @@
         <item name="colorOnSecondary">@color/black</item>
         <!-- Customize your theme here. -->
         <item name="colorIconSecondary">@color/purple_200</item>
+        <item name="popupMenuBackground">@drawable/menu_background</item>
     </style>
 </resources>

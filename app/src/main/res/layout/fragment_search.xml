@@ -26,7 +26,7 @@
             <EditText
                 android:id="@+id/searchText"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:autofillHints=""
                 android:hint="@string/search_hint"
                 android:inputType="textWebEditText|text" />

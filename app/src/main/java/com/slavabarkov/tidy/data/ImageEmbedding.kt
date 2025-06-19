@@ -1,6 +1,7 @@
 package com.slavabarkov.tidy.data
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
 
@@ -41,8 +42,11 @@ data class ImageEmbedding(
     /**
      * The actual embedding vector for the image.
      */
-    val embedding: FloatArray
+    val embedding: FloatArray,
 ) {
+    @Ignore
+    @Transient
+    var expiresAt: Long? = null
     // --- Auto-generated equals/hashCode based on all fields ---
     // Note: Default data class equals/hashCode considers all fields, including the embedding array.
     // This might be inefficient if used in Sets/Maps frequently.

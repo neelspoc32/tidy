@@ -163,6 +163,8 @@ class ImageFragment : Fragment() {
 
         // --- Button Logic ---
         val buttonImage2Image: Button = view.findViewById(R.id.buttonImage2Image)
+        val openedFromRecycleBin = internalId?.let { it < 0 } == true
+        buttonImage2Image.visibility = if (openedFromRecycleBin) View.GONE else View.VISIBLE
         buttonImage2Image.setOnClickListener {
             Log.d("ImageFragment", "Image2Image button clicked for internalId: $internalId") // Log ID being used
             // Image-to-Image search needs the embedding.
@@ -201,6 +203,7 @@ class ImageFragment : Fragment() {
 
         // Share button uses the URI directly, which should still work
         val buttonShare: Button = view.findViewById(R.id.buttonShare)
+        buttonShare.visibility = if (openedFromRecycleBin) View.GONE else View.VISIBLE
         buttonShare.setOnClickListener {
             val sendIntent: Intent = Intent().apply {
                 action = Intent.ACTION_SEND

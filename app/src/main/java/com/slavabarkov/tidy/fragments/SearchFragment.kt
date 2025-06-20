@@ -67,6 +67,7 @@ import androidx.core.view.MenuProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.navigation.fragment.findNavController
 import com.slavabarkov.tidy.data.ImageEmbedding
+import com.slavabarkov.tidy.utils.FastScrollHelper
 import kotlinx.coroutines.withContext
 
 class SearchFragment : Fragment() {
@@ -408,6 +409,12 @@ class SearchFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         Log.d("LifecycleDebug", "onViewCreated called")
+
+        val recyclerView = view.findViewById<RecyclerView>(R.id.recycler_view)
+        val scrollThumb = view.findViewById<View>(R.id.custom_scroll_thumb)
+        val scrollZone = view.findViewById<View>(R.id.scroll_zone)
+        FastScrollHelper.setupEdgeScrollZone(recyclerView, scrollZone, scrollThumb)
+
 
         requireActivity().addMenuProvider(object : MenuProvider {
             override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {

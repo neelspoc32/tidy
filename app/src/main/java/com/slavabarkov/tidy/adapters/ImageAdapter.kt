@@ -26,6 +26,7 @@ import androidx.navigation.findNavController
 import androidx.recyclerview.selection.SelectionTracker
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.slavabarkov.tidy.R
 import com.slavabarkov.tidy.data.ImageEmbedding
 
@@ -137,6 +138,7 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
                 .placeholder(R.drawable.ic_baseline_image_24)
                 .error(R.drawable.ic_baseline_broken_image_24)
                 .thumbnail()
+                .transition(DrawableTransitionOptions.withCrossFade())
                 .into(holder.imageView)
         } else {
             Log.e("AdapterDebug", "URI is NULL for InternalID: $itemInternalId")

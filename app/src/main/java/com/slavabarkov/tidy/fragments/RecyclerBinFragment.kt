@@ -35,6 +35,7 @@ import com.slavabarkov.tidy.adapters.ImageAdapter
 import com.slavabarkov.tidy.adapters.ImageItemDetailsLookup
 import com.slavabarkov.tidy.adapters.ImageItemKeyProvider
 import com.slavabarkov.tidy.data.ImageEmbedding
+import com.slavabarkov.tidy.utils.FastScrollHelper
 
 @RequiresApi(Build.VERSION_CODES.R)
 class RecycleBinFragment : Fragment() {
@@ -70,6 +71,9 @@ class RecycleBinFragment : Fragment() {
         emptyStateText = view.findViewById(R.id.emptyStateText)
         selectAllCheckBox = view.findViewById(R.id.selectAllCheckBox)
 
+        val scrollThumb = view.findViewById<View>(R.id.custom_scroll_thumb)
+        val scrollZone = view.findViewById<View>(R.id.scroll_zone)
+        FastScrollHelper.setupEdgeScrollZone(recyclerView, scrollZone, scrollThumb)
         adapter = ImageAdapter(requireContext(), trashedItems) { image ->
             val uri = image.mediaStoreId?.let {
                 ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it)

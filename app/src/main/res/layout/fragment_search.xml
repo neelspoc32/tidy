@@ -76,7 +76,9 @@
             android:layout_height="wrap_content"
             android:gravity="center"
             android:orientation="horizontal"
-            android:paddingBottom="8dp">
+            android:paddingBottom="8dp"
+            android:clipChildren="false"
+            android:clipToPadding="false">
 
             <Button
                 android:id="@+id/deleteButton"
@@ -114,14 +116,44 @@
 
         </LinearLayout>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recycler_view"
+        <FrameLayout
+            android:id="@+id/recycler_frame_container"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:scrollbars="vertical"
-            app:layoutManager="GridLayoutManager"
-            app:spanCount="3" />
+            android:clipChildren="false"
+            android:clipToPadding="false">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recycler_view"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scrollbars="none"
+                app:layoutManager="GridLayoutManager"
+                app:spanCount="3" />
+
+            <View
+                android:id="@+id/custom_scroll_thumb"
+                android:layout_width="8dp"
+                android:layout_height="48dp"
+                android:layout_gravity="end"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/thumb_background"
+                android:clickable="true"
+                android:focusable="true"
+                android:translationZ="8dp" />
+
+            <View
+                android:id="@+id/scroll_zone"
+                android:layout_width="32dp"
+                android:layout_height="match_parent"
+                android:layout_gravity="end"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@android:color/transparent"
+                android:translationZ="5dp" />
+        </FrameLayout>
+
     </LinearLayout>
 
     <View
@@ -187,5 +219,6 @@
         app:layout_constraintCircle="@+id/operationProgressBar"
         tools:text="0%"
         tools:visibility="visible" />
+
 
 </androidx.constraintlayout.widget.ConstraintLayout>

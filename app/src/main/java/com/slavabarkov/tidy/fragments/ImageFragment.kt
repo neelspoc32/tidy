@@ -17,6 +17,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.net.toUri
@@ -136,13 +137,13 @@ class ImageFragment : Fragment() {
 
         // --- Fallback / Augmentation using DocumentFile API if it's a document URI ---
         // Check if query failed to get data or if it looks like a Document URI
-        if (displayDate == null || displayPath == null) {
+        if (displayDate == null || displayPath == null || displayDate!! <= 0) {
             if (DocumentsContract.isDocumentUri(requireContext(), imageUri)) {
                 Log.d("ImageFragment", "Using DocumentFile API as fallback/augmentation for metadata.")
                 try {
                     val docFile = DocumentFile.fromSingleUri(requireContext(), imageUri)
                     if (docFile != null) {
-                        if (displayDate == null) displayDate = docFile.lastModified() // Already in ms
+                        if (displayDate == null || displayDate!! <= 0 ) displayDate = docFile.lastModified() // Already in ms
                         if (displayPath == null) displayPath = docFile.name // Often just the filename
                         // Note: Getting a full "path" from DocumentFile is not straightforward
                         // and usually not recommended. Displaying filename might be sufficient.
@@ -221,6 +222,25 @@ class ImageFragment : Fragment() {
         }
         // --- End Button Logic ---
 
+        // --- Checkbox selection logic ---
+        val selectionMode = arguments?.getBoolean("selectionModeEnabled") ?: false
+        val checkBox = view.findViewById<CheckBox>(R.id.fullScreenCheckbox)
+
+        if (selectionMode) {
+            checkBox.visibility = View.VISIBLE
+
+            // Pre-check if this image was already selected
+            if (mSearchViewModel.selectedItemIds.value?.contains(internalId) == true) {
+                checkBox.isChecked = true
+            }
+
+            checkBox.setOnCheckedChangeListener { _, isChecked ->
+                internalId?.let {
+                    mSearchViewModel.toggleSelection(it, isChecked)
+                }
+
+            }
+        }
         return view
     }
     // --- *** NEW Helper Function to Get Path *** ---

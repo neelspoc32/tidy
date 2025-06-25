@@ -23,6 +23,9 @@
         <action
             android:id="@+id/action_searchFragment_to_imageFragment"
             app:destination="@id/imageFragment" />
+        <action
+            android:id="@+id/action_searchFragment_to_fullScreenGalleryFragment"
+            app:destination="@id/fullScreenGalleryFragment" />
     </fragment>
 
     <fragment
@@ -42,6 +45,33 @@
             app:destination="@id/searchFragment"
             app:popUpTo="@id/searchFragment"
             app:popUpToInclusive="true" />
+    </fragment>
+
+<!--    <fragment-->
+<!--        android:id="@+id/recycleBinFragment"-->
+<!--        android:name="com.slavabarkov.tidy.fragments.RecycleBinFragment"-->
+<!--        android:label="Recycle Bin"-->
+<!--        tools:layout="@layout/fragment_recycle_bin"-->
+<!--        tools:ignore="NewApi">-->
+<!--        <action-->
+<!--            android:id="@+id/action_recycleBinFragment_to_searchFragment"-->
+<!--            app:destination="@id/searchFragment" />-->
+<!--                <action-->
+<!--                    android:id="@+id/action_searchFragment_to_imageFragment"-->
+<!--                    app:destination="@id/imageFragment" />-->
+<!--&lt;!&ndash;        <action&ndash;&gt;-->
+<!--&lt;!&ndash;            android:id="@+id/action_recycleBinFragment_to_fullScreenGalleryFragment"&ndash;&gt;-->
+<!--&lt;!&ndash;            app:destination="@id/fullScreenGalleryFragment" />&ndash;&gt;-->
+<!--    </fragment>-->
+
+    <fragment
+        android:id="@+id/fullScreenGalleryFragment"
+        android:name="com.slavabarkov.tidy.fragments.FullScreenGalleryFragment"
+        android:label="Full Screen Gallery">
+        <argument android:name="imageUris" app:argType="string[]" />
+        <argument android:name="internalIds" app:argType="long[]" />
+        <argument android:name="startIndex" app:argType="integer" />
+        <argument android:name="selectionModeEnabled" app:argType="boolean" android:defaultValue="false" />
     </fragment>
 
 </navigation>

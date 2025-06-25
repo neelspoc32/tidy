@@ -266,6 +266,20 @@ class SearchFragment : Fragment() {
         // Making it visible here ensures it shows up. updateSelectionUi() will refine the text.
         selectedCountTextView?.visibility = View.VISIBLE
 
+        val currentSelected = mSearchViewModel.selectedItemIds.value ?: emptySet()
+
+
+        for (item in currentEmbeddings) {
+            val id = item.internalId
+            val shouldBeSelected = currentSelected.contains(id)
+            val isAlreadySelected = selectionTracker.isSelected(id)
+
+            if (shouldBeSelected && !isAlreadySelected) {
+                selectionTracker.select(id)
+            } else if (!shouldBeSelected && isAlreadySelected) {
+                selectionTracker.deselect(id)
+            }
+        }
         // Call updateSelectionUi() to refresh the text based on current selection
         // and the now updated listCount. This is important if returning to the fragment
         // with an existing selection.
@@ -519,6 +533,15 @@ class SearchFragment : Fragment() {
             showDeleteConfirmationDialog(selectedIds)
         }
 
+        mSearchViewModel.scrollTarget.observe(viewLifecycleOwner) { index ->
+            if (index != null && !mSearchViewModel.fromImg2ImgFlag) {
+                recyclerView.post {
+                    recyclerView.layoutManager?.scrollToPosition(index)
+                }
+
+                mSearchViewModel.scrollTarget.value = null // reset to avoid re-triggering
+            }
+        }
 
         Log.d("LifecycleDebug", "onViewCreated finished")
     }

@@ -29,13 +29,13 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.slavabarkov.tidy.R
 import com.slavabarkov.tidy.data.ImageEmbedding
-
+import com.slavabarkov.tidy.fragments.SearchFragmentDirections
+import androidx.core.os.bundleOf
 
 // Changed constructor to accept List<ImageEmbedding>
-class ImageAdapter(private val context: Context, initialDataset: List<ImageEmbedding>,private val onItemClick: ((ImageEmbedding) -> Unit)? = null) :
+class ImageAdapter(private val context: Context, initialDataset: List<ImageEmbedding>,private val onItemClick: ((ImageEmbedding) -> Unit)? = null,private val isFromRecycleBin: Boolean = false) :
     RecyclerView.Adapter<ImageAdapter.ImageViewHolder>() {
     private var dataset: List<ImageEmbedding> = initialDataset
-
     lateinit var selectionTracker: SelectionTracker<Long>
 
     init {
@@ -235,8 +235,9 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
                     selectionTracker.select(itemInternalId)
                 }
             } else {
+                navigateToFullScreenGallery(holder.itemView, holder.adapterPosition)
                 // Navigate using the determined URI and internalId
-                performNavigation(imageUriToLoad, itemInternalId) // Call adapted performNavigation
+                //performNavigation(imageUriToLoad, itemInternalId) // Call adapted performNavigation
             }
         }
 
@@ -291,8 +292,9 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
                 "ClickListenerDebug",
                 "EnlargeButton OnClickListener triggered for item internalId $itemInternalId"
             )
+            navigateToFullScreenGallery(holder.itemView, holder.adapterPosition)
             // Call the adapted navigation logic
-            performNavigation(imageUriToLoad, itemInternalId)
+            //performNavigation(imageUriToLoad, itemInternalId)
         }
         // *** END Listener Setup ***
 
@@ -314,5 +316,50 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
             }
         }
 
+
+
+    private fun navigateToFullScreenGallery(view: View, clickedPosition: Int) {
+        val uriList = dataset.mapNotNull { item ->
+            when {
+                !item.documentUri.isNullOrBlank() -> {
+                    try { item.documentUri.toUri() } catch (_: Exception) { null }
+                }
+                item.mediaStoreId != null -> {
+                    try {
+                        ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            item.mediaStoreId
+                        )
+                    } catch (_: Exception) { null }
+                }
+                else -> null
+            }
+        }.map { it.toString() }.toTypedArray()
+
+        val idList = dataset.map { it.internalId }.toLongArray()
+
+        if (isFromRecycleBin) {
+            // fallback behavior: open ImageFragment directly
+            val bundle = bundleOf(
+                "internalId" to idList[clickedPosition],
+                "imageUriString" to uriList[clickedPosition]
+            )
+            view.findNavController().navigate(R.id.imageFragment, bundle)
+        } else {
+            val action = SearchFragmentDirections.actionSearchFragmentToFullScreenGalleryFragment(
+                imageUris = uriList,
+                internalIds = idList,
+                startIndex = clickedPosition,
+                selectionModeEnabled = selectionTracker.hasSelection()
+            )
+
+            try {
+                view.findNavController().navigate(action)
+            } catch (e: Exception) {
+                Log.e("ImageAdapter", "Navigation failed", e)
+                Toast.makeText(context, "Could not open gallery", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
 }

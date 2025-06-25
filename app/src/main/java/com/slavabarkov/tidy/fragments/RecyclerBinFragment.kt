@@ -73,8 +73,15 @@ class RecycleBinFragment : Fragment() {
 
         val scrollThumb = view.findViewById<View>(R.id.custom_scroll_thumb)
         val scrollZone = view.findViewById<View>(R.id.scroll_zone)
+
+        super.onCreate(savedInstanceState)
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            findNavController().popBackStack()
+        }
+
         FastScrollHelper.setupEdgeScrollZone(recyclerView, scrollZone, scrollThumb)
-        adapter = ImageAdapter(requireContext(), trashedItems) { image ->
+        adapter = ImageAdapter(requireContext(), trashedItems ,{ image ->
             val uri = image.mediaStoreId?.let {
                 ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it)
             } ?: return@ImageAdapter
@@ -84,7 +91,7 @@ class RecycleBinFragment : Fragment() {
                 "imageUriString" to uri.toString()
             )
             findNavController().navigate(R.id.imageFragment, bundle)
-        }
+        }, isFromRecycleBin = true)
 
         recyclerView.adapter = adapter
         //trashedItems = loadTrashedImages()

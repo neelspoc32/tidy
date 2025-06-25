@@ -1,17 +1,16 @@
 package com.slavabarkov.tidy.fragments
 
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
+import android.view.*
+import android.widget.FrameLayout
+import androidx.activity.addCallback
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.activityViewModels
 import androidx.navigation.fragment.findNavController
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
+import com.slavabarkov.tidy.fragments.ImageFragment
 import com.slavabarkov.tidy.R
 import com.slavabarkov.tidy.utils.PageIndicatorView
-import com.slavabarkov.tidy.viewmodels.SearchViewModel
 
 class FullScreenGalleryFragment : Fragment() {
 
@@ -19,9 +18,18 @@ class FullScreenGalleryFragment : Fragment() {
     private lateinit var imageUris: List<String>
     private lateinit var internalIds: List<Long>
     private var startIndex: Int = 0
-    private var currentIndex: Int = 0
     private var selectionModeEnabled: Boolean = false
-    private val sharedViewModel: SearchViewModel by activityViewModels()
+    private var currentIndex = 0
+
+    private lateinit var indicatorView: PageIndicatorView
+
+    private val fadeOutRunnable = Runnable {
+        indicatorView.animate()
+            .alpha(0f)
+            .setDuration(300)
+            .start()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         arguments?.let {
@@ -33,10 +41,21 @@ class FullScreenGalleryFragment : Fragment() {
     }
 
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
+        inflater: LayoutInflater,
+        container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        viewPager = ViewPager2(requireContext())
+        return inflater.inflate(R.layout.fragment_full_screen_gallery, container, false)
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        viewPager = view.findViewById(R.id.viewPager)
+        indicatorView = view.findViewById(R.id.pageIndicator)
+
+        currentIndex = startIndex
+
         viewPager.adapter = object : FragmentStateAdapter(this) {
             override fun getItemCount(): Int = imageUris.size
 
@@ -50,76 +69,50 @@ class FullScreenGalleryFragment : Fragment() {
                 }
             }
         }
+
         viewPager.setCurrentItem(startIndex, false)
-        currentIndex = startIndex
-
-//        viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
-//            override fun onPageSelected(position: Int) {
-//                super.onPageSelected(position)
-//                currentIndex = position
-//            }
-//        })
-        return inflater.inflate(R.layout.fragment_full_screen_gallery, container, false)
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        findNavController().previousBackStackEntry
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
-        viewPager = view.findViewById(R.id.viewPager)
-        val indicatorView = view.findViewById<PageIndicatorView>(R.id.pageIndicator)
-
-        viewPager.adapter = object : FragmentStateAdapter(this) {
-            override fun getItemCount() = imageUris.size
-            override fun createFragment(position: Int): Fragment {
-                return ImageFragment().apply {
-                    arguments = Bundle().apply {
-                        putString("imageUriString", imageUris[position])
-                        putLong("internalId", internalIds[position])
-                        putBoolean("selectionModeEnabled", selectionModeEnabled)
-                    }
-                }
-            }
-        }
-        fun showAndAutoHideIndicator(position: Int) {
-            indicatorView.clearAnimation()
-            indicatorView.animate()
-                .alpha(1f)
-                .setDuration(150)
-                .start()
-            indicatorView.update(position, imageUris.size)
-
-            // Cancel any pending hide
-            indicatorView.removeCallbacks(null)
-
-            // Auto-hide after 3 seconds
-            indicatorView.postDelayed({
-                indicatorView.animate()
-                    .alpha(0f)
-                    .setDuration(300)
-                    .start()
-            }, 3000)
-        }
-        // Initial show
         showAndAutoHideIndicator(startIndex)
-        viewPager.setCurrentItem(startIndex, false)
-        indicatorView.update(startIndex, imageUris.size)
 
         viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                 super.onPageSelected(position)
-                 currentIndex = position
+                super.onPageSelected(position)
+                currentIndex = position
+
                 findNavController().previousBackStackEntry
                     ?.savedStateHandle
-                    ?.set("scrollToIndex", currentIndex)
+                    ?.set("scrollToIndex", position)
+
                 showAndAutoHideIndicator(position)
             }
         })
 
+        // Optional: sync scroll when back is pressed manually
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner) {
+            findNavController().previousBackStackEntry
+                ?.savedStateHandle
+                ?.set("scrollToIndex", currentIndex)
+
+            findNavController().popBackStack()
+        }
     }
 
+    private fun showAndAutoHideIndicator(position: Int) {
+        // Cancel previous fade-out
+        indicatorView.removeCallbacks(fadeOutRunnable)
+
+        // Update & show
+        indicatorView.update(position, imageUris.size)
+        indicatorView.animate()
+            .alpha(1f)
+            .setDuration(150)
+            .start()
+
+        // Schedule fade-out
+        indicatorView.postDelayed(fadeOutRunnable, 3000)
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        indicatorView.removeCallbacks(fadeOutRunnable)
+    }
 }

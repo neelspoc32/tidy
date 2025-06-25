@@ -103,10 +103,25 @@ class FullScreenGalleryFragment : Fragment() {
         // Update & show
         indicatorView.update(position, imageUris.size)
         indicatorView.animate()
-            .alpha(1f)
-            .setDuration(150)
-            .start()
+            .cancel() // cancel previous animations just in case
 
+        indicatorView.scaleX = 0.85f
+        indicatorView.scaleY = 0.85f
+        indicatorView.alpha = 0f
+
+        indicatorView.animate()
+            .alpha(1f)
+            .scaleX(1.15f)
+            .scaleY(1.15f)
+            .setDuration(150)
+            .withEndAction {
+                indicatorView.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(100)
+                    .start()
+            }
+            .start()
         // Schedule fade-out
         indicatorView.postDelayed(fadeOutRunnable, 3000)
     }

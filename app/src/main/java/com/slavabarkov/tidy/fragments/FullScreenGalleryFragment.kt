@@ -65,7 +65,6 @@ class FullScreenGalleryFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         findNavController().previousBackStackEntry
-        sharedViewModel.scrollTarget.value = currentIndex
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -114,6 +113,9 @@ class FullScreenGalleryFragment : Fragment() {
             override fun onPageSelected(position: Int) {
                  super.onPageSelected(position)
                  currentIndex = position
+                findNavController().previousBackStackEntry
+                    ?.savedStateHandle
+                    ?.set("scrollToIndex", currentIndex)
                 showAndAutoHideIndicator(position)
             }
         })

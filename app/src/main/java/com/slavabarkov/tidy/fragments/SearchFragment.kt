@@ -533,6 +533,13 @@ class SearchFragment : Fragment() {
             showDeleteConfirmationDialog(selectedIds)
         }
 
+        findNavController().currentBackStackEntry
+            ?.savedStateHandle
+            ?.getLiveData<Int>("scrollToIndex")
+            ?.observe(viewLifecycleOwner) { index ->
+                mSearchViewModel.scrollTarget.value = index
+            }
+
         mSearchViewModel.scrollTarget.observe(viewLifecycleOwner) { index ->
             if (index != null && !mSearchViewModel.fromImg2ImgFlag) {
                 recyclerView.post {

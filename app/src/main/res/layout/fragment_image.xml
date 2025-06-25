@@ -15,21 +15,6 @@
         android:gravity="center"
         android:orientation="horizontal">
 
-        <CheckBox
-            android:id="@+id/fullScreenCheckbox"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_margin="0dp"
-            android:gravity="center"
-            android:text=""
-            android:textSize="18sp"
-            android:background="?attr/selectableItemBackground"
-            android:buttonTint="@color/teal_200"
-            android:visibility="gone"
-            android:layout_weight="1"
-            android:layout_gravity="top|end"
-            tools:visibility="visible" />
-
         <TextView
             android:id="@+id/dateTextView"
             android:layout_width="0dp"
@@ -62,14 +47,28 @@
 
     </LinearLayout>
 
-    <com.github.chrisbanes.photoview.PhotoView
-        android:id="@+id/singeImageView"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="83"
-        android:background="#f3f3f3"
-        tools:src="@tools:sample/avatars" />
+        android:layout_weight="83">
 
+        <com.github.chrisbanes.photoview.PhotoView
+            android:id="@+id/singeImageView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#f3f3f3"
+            tools:src="@tools:sample/avatars" />
+
+        <CheckBox
+            android:id="@+id/fullScreenCheckbox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="12dp"
+            android:layout_gravity="top|end"
+            android:visibility="gone"
+            android:buttonTint="@color/teal_200"
+            tools:visibility="visible" />
+    </FrameLayout>
     <TextView
         android:id="@+id/locationTextView"
         android:layout_width="match_parent"

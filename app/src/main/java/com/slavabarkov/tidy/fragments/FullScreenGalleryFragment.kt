@@ -9,6 +9,8 @@ import androidx.fragment.app.activityViewModels
 import androidx.navigation.fragment.findNavController
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
+import com.slavabarkov.tidy.R
+import com.slavabarkov.tidy.utils.PageIndicatorView
 import com.slavabarkov.tidy.viewmodels.SearchViewModel
 
 class FullScreenGalleryFragment : Fragment() {
@@ -51,13 +53,13 @@ class FullScreenGalleryFragment : Fragment() {
         viewPager.setCurrentItem(startIndex, false)
         currentIndex = startIndex
 
-        viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
-            override fun onPageSelected(position: Int) {
-                super.onPageSelected(position)
-                currentIndex = position
-            }
-        })
-        return viewPager
+//        viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+//            override fun onPageSelected(position: Int) {
+//                super.onPageSelected(position)
+//                currentIndex = position
+//            }
+//        })
+        return inflater.inflate(R.layout.fragment_full_screen_gallery, container, false)
     }
 
     override fun onDestroyView() {
@@ -65,4 +67,57 @@ class FullScreenGalleryFragment : Fragment() {
         findNavController().previousBackStackEntry
         sharedViewModel.scrollTarget.value = currentIndex
     }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        viewPager = view.findViewById(R.id.viewPager)
+        val indicatorView = view.findViewById<PageIndicatorView>(R.id.pageIndicator)
+
+        viewPager.adapter = object : FragmentStateAdapter(this) {
+            override fun getItemCount() = imageUris.size
+            override fun createFragment(position: Int): Fragment {
+                return ImageFragment().apply {
+                    arguments = Bundle().apply {
+                        putString("imageUriString", imageUris[position])
+                        putLong("internalId", internalIds[position])
+                        putBoolean("selectionModeEnabled", selectionModeEnabled)
+                    }
+                }
+            }
+        }
+        fun showAndAutoHideIndicator(position: Int) {
+            indicatorView.clearAnimation()
+            indicatorView.animate()
+                .alpha(1f)
+                .setDuration(150)
+                .start()
+            indicatorView.update(position, imageUris.size)
+
+            // Cancel any pending hide
+            indicatorView.removeCallbacks(null)
+
+            // Auto-hide after 3 seconds
+            indicatorView.postDelayed({
+                indicatorView.animate()
+                    .alpha(0f)
+                    .setDuration(300)
+                    .start()
+            }, 3000)
+        }
+        // Initial show
+        showAndAutoHideIndicator(startIndex)
+        viewPager.setCurrentItem(startIndex, false)
+        indicatorView.update(startIndex, imageUris.size)
+
+        viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                 super.onPageSelected(position)
+                 currentIndex = position
+                showAndAutoHideIndicator(position)
+            }
+        })
+
+    }
+
 }

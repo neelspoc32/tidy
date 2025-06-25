@@ -32,7 +32,7 @@ import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
 import com.slavabarkov.tidy.viewmodels.SearchViewModel
 import java.io.File
 import java.text.DateFormat
-
+import android.view.animation.OvershootInterpolator
 
 class ImageFragment : Fragment() {
     // Store the received URI string and internalId
@@ -228,6 +228,21 @@ class ImageFragment : Fragment() {
 
         if (selectionMode) {
             checkBox.visibility = View.VISIBLE
+
+            checkBox.apply {
+                scaleX = 0.7f
+                scaleY = 0.7f
+                alpha = 0f
+                visibility = View.VISIBLE
+
+                animate()
+                    .alpha(1f)
+                    .scaleX(1.2f)
+                    .scaleY(1.2f)
+                    .setInterpolator(OvershootInterpolator(2f)) // springy pop
+                    .setDuration(200)
+                    .start()
+            }
 
             // Pre-check if this image was already selected
             if (mSearchViewModel.selectedItemIds.value?.contains(internalId) == true) {

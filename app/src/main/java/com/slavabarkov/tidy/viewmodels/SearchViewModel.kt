@@ -10,12 +10,16 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.slavabarkov.tidy.dot
 
-class SearchViewModel(application: Application) : AndroidViewModel(application) {
+class SearchViewModel(application: Application) : AndroidViewModel(application), ImageSelectionState {
     var searchResults: List<Long>? = null
     var fromImg2ImgFlag: Boolean = false
     private val _selectedItemIds = MutableLiveData<Set<Long>>(emptySet())
-    val selectedItemIds: LiveData<Set<Long>> = _selectedItemIds
     val scrollTarget = MutableLiveData<Int?>()
+
+    override val selectedItemIds: LiveData<Set<Long>>
+        get() = this._selectedItemIds
+
+
     fun sortByCosineDistance(searchEmbedding: FloatArray,
                           imageEmbeddingsList: List<FloatArray>,
                           imageIdxList: List<Long>) {
@@ -27,12 +31,9 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         searchResults = distances.toList().sortedBy { (k, v) -> v }.map { (k, v) -> k }.reversed()
     }
     // Function to update selected IDs from SearchFragment
-    fun saveSelection(selection: Set<Long>) {
-        if (_selectedItemIds.value != selection) { // Only update if changed
-            _selectedItemIds.value = selection
-        }
+    override fun saveSelection(newSet: Set<Long>) {
+        _selectedItemIds.value = newSet
     }
-
     // Function to clear saved selection (e.g., on clear button)
     fun clearSavedSelection() {
         _selectedItemIds.value = emptySet()
@@ -44,19 +45,6 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setUiOperationInProgress(isInProgress: Boolean) {
         _uiOperationInProgress.postValue(isInProgress)
-    }
-
-    fun toggleSelection(id: Long, isSelected: Boolean) {
-        val current = _selectedItemIds.value ?: emptySet()
-        val updated = current.toMutableSet()
-
-        if (isSelected) {
-            updated.add(id)
-        } else {
-            updated.remove(id)
-        }
-
-        saveSelection(updated)
     }
 
 }

@@ -66,8 +66,10 @@ import androidx.core.net.toUri
 import androidx.core.view.MenuProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.navigation.fragment.findNavController
+import androidx.recyclerview.widget.GridLayoutManager
 import com.slavabarkov.tidy.data.ImageEmbedding
 import com.slavabarkov.tidy.utils.FastScrollHelper
+import com.slavabarkov.tidy.utils.GalleryNavigationHelper
 import kotlinx.coroutines.withContext
 
 class SearchFragment : Fragment() {
@@ -342,7 +344,24 @@ class SearchFragment : Fragment() {
 
 
         //STEP 1 ADAPTER CREATION
-        imageAdapter =  ImageAdapter(requireContext(), initialEmbeddingList) // Pass initial data
+        imageAdapter = ImageAdapter(
+            requireContext(),
+            initialEmbeddingList,
+            onItemClick = { clickedItem ->
+                val bundle = GalleryNavigationHelper.buildGalleryArgs(
+                    initialEmbeddingList,
+                    clickedItem,
+                    selectedIds = mSearchViewModel.selectedItemIds.value ?: emptySet()
+                )
+                bundle?.let {
+                    findNavController().navigate(
+                        R.id.action_searchFragment_to_fullScreenGalleryFragment,
+                        it
+                    )
+                }
+            },
+            isFromRecycleBin = false
+        )
         recyclerView.adapter = imageAdapter
 
         //STEP 3
@@ -543,7 +562,8 @@ class SearchFragment : Fragment() {
         mSearchViewModel.scrollTarget.observe(viewLifecycleOwner) { index ->
             if (index != null && !mSearchViewModel.fromImg2ImgFlag) {
                 recyclerView.post {
-                    recyclerView.layoutManager?.scrollToPosition(index)
+                    val layoutManager = recyclerView.layoutManager as? GridLayoutManager
+                    layoutManager?.scrollToPositionWithOffset(index, 100) // offset from top in pixels
                 }
 
                 mSearchViewModel.scrollTarget.value = null // reset to avoid re-triggering
@@ -969,7 +989,7 @@ class SearchFragment : Fragment() {
         try {
             contentResolver.openInputStream(sourceUri)?.buffered(32 * 1024)?.use { inputStream ->
                 contentResolver.openOutputStream(copiedFile.uri)?.buffered(32 * 1024)?.use { outputStream ->
-                    inputStream.copyTo(outputStream, bufferSize = 32 * 1024);
+                    inputStream.copyTo(outputStream, bufferSize = 32 * 1024)
                     success = true
                 }
             }
@@ -1422,7 +1442,7 @@ class SearchFragment : Fragment() {
         deleteButton?.isEnabled = hasSelection && !operationInProgress
 
         if (hasSelection) {
-            selectedCountTextView?.text = "$selectedCount/$lsCount items selected"
+            selectedCountTextView?.text = "$selectedCount/$lsCount images selected"
             selectAllCheckbox?.visibility = View.VISIBLE // Show select all when selection is active
             selectAllCheckbox?.isChecked = (selectedCount == totalItems) // Check if all are selected
         }else {

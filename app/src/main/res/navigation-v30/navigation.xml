@@ -56,8 +56,8 @@
             android:id="@+id/action_recycleBinFragment_to_searchFragment"
             app:destination="@id/searchFragment" />
         <action
-            android:id="@+id/action_searchFragment_to_imageFragment"
-            app:destination="@id/imageFragment" />
+            android:id="@+id/action_recycleBinFragment_to_fullScreenGalleryFragment"
+            app:destination="@id/fullScreenGalleryFragment" />
     </fragment>
 
     <fragment

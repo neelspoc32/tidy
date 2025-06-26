@@ -22,13 +22,14 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
-import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.selection.SelectionPredicates
 import androidx.recyclerview.selection.SelectionTracker
 import androidx.recyclerview.selection.StorageStrategy
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.slavabarkov.tidy.R
 import com.slavabarkov.tidy.adapters.ImageAdapter
@@ -36,6 +37,8 @@ import com.slavabarkov.tidy.adapters.ImageItemDetailsLookup
 import com.slavabarkov.tidy.adapters.ImageItemKeyProvider
 import com.slavabarkov.tidy.data.ImageEmbedding
 import com.slavabarkov.tidy.utils.FastScrollHelper
+import com.slavabarkov.tidy.utils.GalleryNavigationHelper
+import com.slavabarkov.tidy.viewmodels.RecycleBinViewModel
 
 @RequiresApi(Build.VERSION_CODES.R)
 class RecycleBinFragment : Fragment() {
@@ -50,7 +53,7 @@ class RecycleBinFragment : Fragment() {
     private lateinit var selectAllCheckBox: CheckBox
     private lateinit var restoreResultLauncher: ActivityResultLauncher<IntentSenderRequest>
     private lateinit var deleteResultLauncher: ActivityResultLauncher<IntentSenderRequest>
-
+    private val mRecycleBinVM: RecycleBinViewModel by activityViewModels()
     private var trashedItems = mutableListOf<ImageEmbedding>()
     private var isFirstLoad = true
     companion object {
@@ -81,16 +84,18 @@ class RecycleBinFragment : Fragment() {
         }
 
         FastScrollHelper.setupEdgeScrollZone(recyclerView, scrollZone, scrollThumb)
-        adapter = ImageAdapter(requireContext(), trashedItems ,{ image ->
-            val uri = image.mediaStoreId?.let {
-                ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it)
-            } ?: return@ImageAdapter
-
-            val bundle = bundleOf(
-                "internalId" to image.internalId,
-                "imageUriString" to uri.toString()
+        adapter = ImageAdapter(requireContext(), trashedItems, { image ->
+            val bundle = GalleryNavigationHelper.buildGalleryArgs(
+                trashedItems,
+                image,
+                selectedIds = mRecycleBinVM.selectedItemIds.value ?: emptySet()
             )
-            findNavController().navigate(R.id.imageFragment, bundle)
+
+            if (bundle != null) {
+                findNavController().navigate(R.id.action_recycleBinFragment_to_fullScreenGalleryFragment, bundle)
+            } else {
+                Toast.makeText(requireContext(), "Could not open image", Toast.LENGTH_SHORT).show()
+            }
         }, isFromRecycleBin = true)
 
         recyclerView.adapter = adapter
@@ -107,24 +112,15 @@ class RecycleBinFragment : Fragment() {
 
         selectionTracker.addObserver(object : SelectionTracker.SelectionObserver<Long>() {
             override fun onSelectionChanged() {
-                val selected = selectionTracker.selection.size()
-                lastSelectedIds = selectionTracker.selection.toList()
-                val total = trashedItems.size
-                imageCountText.text = "$selected/$total selected"
-                // Show checkbox only when user has entered selection mode
-                selectAllCheckBox.visibility = if (selectionTracker.hasSelection()) View.VISIBLE else View.GONE
-                selectAllCheckBox.setOnCheckedChangeListener(null)
-                selectAllCheckBox.isChecked = selected == total && total > 0
-                selectAllCheckBox.setOnCheckedChangeListener { _, isChecked ->
-                    if (isChecked) {
-                        trashedItems.forEach { selectionTracker.select(it.internalId) }
-                    } else {
-                        selectionTracker.clearSelection()
-                    }
-                }
+                val selected = selectionTracker.selection.toSet()
+                mRecycleBinVM.saveSelection(selected)  // triggers LiveData
             }
         })
-
+        mRecycleBinVM.selectedItemIds.value?.let { previouslySelected ->
+            if (previouslySelected.isNotEmpty()) {
+                selectionTracker.setItemsSelected(previouslySelected, true)
+            }
+        }
 //        selectAllCheckBox.setOnCheckedChangeListener { _, isChecked ->
 //            if (isChecked) {
 //                trashedItems.forEach { selectionTracker.select(it.internalId) }
@@ -207,6 +203,27 @@ class RecycleBinFragment : Fragment() {
                 Toast.makeText(context, "No images selected to delete.", Toast.LENGTH_SHORT).show()
             }
         }
+        // Observe scrollToIndex sent back from FullScreenGalleryFragment
+        findNavController().currentBackStackEntry
+            ?.savedStateHandle
+            ?.getLiveData<Int>("scrollToIndex")
+            ?.observe(viewLifecycleOwner) { index ->
+                mRecycleBinVM.scrollTarget.value = index
+            }
+
+        mRecycleBinVM.selectedItemIds.observe(viewLifecycleOwner) {
+            updateSelectionUi()
+        }
+
+        mRecycleBinVM.scrollTarget.observe(viewLifecycleOwner) { index ->
+            index?.let {
+                val layoutManager = recyclerView.layoutManager as? GridLayoutManager
+                layoutManager?.scrollToPositionWithOffset(index, 100) // offset from top in pixels
+                mRecycleBinVM.scrollTarget.value = null // consume
+            }
+        }
+
+
 //        val selectAllCheckBox = view.findViewById<CheckBox>(R.id.selectAllCheckBox)
 //        selectAllCheckBox.setOnCheckedChangeListener { _, isChecked ->
 //            if (isChecked) {
@@ -276,7 +293,7 @@ class RecycleBinFragment : Fragment() {
                 idsToRestore?.forEach { selectionTracker.select(it) }
             }
         }
-        imageCountText.text = "0/${trashedItems.size} selected"
+        imageCountText.text = "${trashedItems.size} Images"
         emptyStateText.isVisible = trashedItems.isEmpty()
         progressBar.isVisible = false
         return trashedItems
@@ -287,7 +304,32 @@ class RecycleBinFragment : Fragment() {
         trashedItems.removeAll { selectedIds.contains(it.internalId) }
         adapter.updateData(trashedItems)
         selectionTracker.clearSelection()
-        imageCountText.text = "0/${trashedItems.size} selected"
+        imageCountText.text = "0/${trashedItems.size} images selected"
         emptyStateText.isVisible = trashedItems.isEmpty()
+    }
+
+    private fun updateSelectionUi() {
+        val selected = mRecycleBinVM.selectedItemIds.value?.size ?: 0
+        val total = trashedItems.size
+
+        if (selected > 0) {
+            imageCountText.text = "$selected/$total images selected"
+            imageCountText.visibility = View.VISIBLE
+            selectAllCheckBox.visibility = View.VISIBLE
+        } else {
+            imageCountText.text = "${trashedItems.size} Images"
+            selectAllCheckBox.visibility = View.GONE
+        }
+
+        // Set selectAllCheckBox state without triggering listener
+        selectAllCheckBox.setOnCheckedChangeListener(null)
+        selectAllCheckBox.isChecked = selected == total && total > 0
+        selectAllCheckBox.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                trashedItems.forEach { selectionTracker.select(it.internalId) }
+            } else {
+                selectionTracker.clearSelection()
+            }
+        }
     }
 }

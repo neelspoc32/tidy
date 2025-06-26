@@ -33,6 +33,7 @@ import com.slavabarkov.tidy.viewmodels.SearchViewModel
 import java.io.File
 import java.text.DateFormat
 import android.view.animation.OvershootInterpolator
+import com.slavabarkov.tidy.viewmodels.RecycleBinViewModel
 
 class ImageFragment : Fragment() {
     // Store the received URI string and internalId
@@ -42,7 +43,7 @@ class ImageFragment : Fragment() {
     // Keep ViewModels
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
-
+    private val mRecycleBinVM: RecycleBinViewModel by activityViewModels()
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?,
@@ -245,16 +246,19 @@ class ImageFragment : Fragment() {
             }
 
             // Pre-check if this image was already selected
-            if (mSearchViewModel.selectedItemIds.value?.contains(internalId) == true) {
+            val ownerVM = if (openedFromRecycleBin) mRecycleBinVM else mSearchViewModel
+            if (ownerVM.selectedItemIds.value?.contains(internalId) == true) {
                 checkBox.isChecked = true
             }
 
             checkBox.setOnCheckedChangeListener { _, isChecked ->
                 internalId?.let {
-                    mSearchViewModel.toggleSelection(it, isChecked)
+                    val updated = (ownerVM.selectedItemIds.value ?: emptySet()).toMutableSet()
+                    if (isChecked) updated.add(it) else updated.remove(it)
+                    ownerVM.saveSelection(updated)
+                }
                 }
 
-            }
         }
         return view
     }

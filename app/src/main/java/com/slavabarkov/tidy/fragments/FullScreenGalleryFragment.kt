@@ -2,13 +2,15 @@ package com.slavabarkov.tidy.fragments
 
 import android.os.Bundle
 import android.view.*
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.TextView
 import androidx.activity.addCallback
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
-import com.slavabarkov.tidy.fragments.ImageFragment
 import com.slavabarkov.tidy.R
 import com.slavabarkov.tidy.utils.PageIndicatorView
 
@@ -29,6 +31,16 @@ class FullScreenGalleryFragment : Fragment() {
             .setDuration(300)
             .start()
     }
+    private fun hasDismissedHint(): Boolean {
+        return requireContext().getSharedPreferences("gallery_prefs", 0)
+            .getBoolean("dismissed_swipe_hint", false)
+    }
+
+    private fun dismissHintPermanently() {
+        requireContext().getSharedPreferences("gallery_prefs", 0)
+            .edit().putBoolean("dismissed_swipe_hint", true).apply()
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +62,9 @@ class FullScreenGalleryFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        // 🔧 TEMP: Reset "don't show again" so hint appears every time for now
+        //requireContext().getSharedPreferences("gallery_prefs", 0)
+        //    .edit().remove("dismissed_swipe_hint").apply()
 
         viewPager = view.findViewById(R.id.viewPager)
         indicatorView = view.findViewById(R.id.pageIndicator)
@@ -71,6 +86,53 @@ class FullScreenGalleryFragment : Fragment() {
         }
 
         viewPager.setCurrentItem(startIndex, false)
+
+        val swipeHintOverlay = view.findViewById<FrameLayout>(R.id.swipeHintOverlay)
+        val gestureImage = view.findViewById<ImageView>(R.id.gestureImage)
+        val dismissButton = view.findViewById<Button>(R.id.dismissHintButton)
+        val swipeHintText = view.findViewById<TextView>(R.id.swipeHintText)
+        // Only show if user hasn't dismissed it
+        if (!hasDismissedHint()) {
+            swipeHintOverlay.visibility = View.VISIBLE
+
+            when (currentIndex) {
+                0 -> {
+                    gestureImage.setImageResource(R.drawable.ic_swipe_left)
+                    swipeHintText.text = "Swipe left to continue"
+                }
+                imageUris.lastIndex -> {
+                    gestureImage.setImageResource(R.drawable.ic_swipe_right)
+                    swipeHintText.text = "Swipe right to go back"
+                }
+                else -> {
+                    gestureImage.setImageResource(R.drawable.ic_swipe_both)
+                    swipeHintText.text = "Swipe left or right"
+                }
+            }
+
+            dismissButton.setOnClickListener {
+                swipeHintOverlay.animate()
+                    .alpha(0f)
+                    .setDuration(300)
+                    .withEndAction {
+                        swipeHintOverlay.visibility = View.GONE
+                        dismissHintPermanently()
+                    }
+                    .start()
+            }
+
+            // Optional: dismiss when tapped anywhere
+            swipeHintOverlay.setOnClickListener {
+                swipeHintOverlay.animate()
+                    .alpha(0f)
+                    .setDuration(300)
+                    .withEndAction {
+                        swipeHintOverlay.visibility = View.GONE
+                    }
+                    .start()
+            }
+        }
+
         showAndAutoHideIndicator(startIndex)
 
         viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
@@ -95,6 +157,7 @@ class FullScreenGalleryFragment : Fragment() {
             findNavController().popBackStack()
         }
     }
+
 
     private fun showAndAutoHideIndicator(position: Int) {
         // Cancel previous fade-out

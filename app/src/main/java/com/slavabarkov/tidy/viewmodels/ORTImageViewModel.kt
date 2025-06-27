@@ -37,6 +37,7 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
 import java.nio.FloatBuffer
+import kotlin.math.sqrt
 
 // Data class for status updates
 data class ProcessingStatus(
@@ -746,4 +747,51 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         // Treat move as a deletion of the old record
         deleteEmbeddingsByInternalId(listOf(internalId))
     }
+
+    fun getImageEmbedding(bitmap: Bitmap): FloatArray {
+        val inputTensor = preprocessBitmap(bitmap) // resize, normalize, etc.
+        val outputBuffer = Array(1) { FloatArray(512) }
+
+        val currentOrtSession = ortSession ?: return outputBuffer[0]
+        val currentOrtEnv = ortEnv ?: return outputBuffer[0]
+
+        val inputName = currentOrtSession.inputNames?.iterator()?.next() ?: run {
+            Log.e("ORTImageViewModel", "Could not resolve input name from session.")
+            return outputBuffer[0]
+        }
+
+
+        ortSession?.run(
+            mapOf(inputName to OnnxTensor.createTensor(currentOrtEnv, inputTensor))
+        ).use { result ->
+            @Suppress("UNCHECKED_CAST")
+            val rawOutput = result?.get(0)?.value as Array<FloatArray>
+            outputBuffer[0] = normalizeL2(rawOutput[0])
+        }
+        return outputBuffer[0]
+    }
+
+    // Helper: Normalize to unit length
+    private fun normalizeL2(vector: FloatArray): FloatArray {
+        val norm = sqrt(vector.map { it * it }.sum())
+        return vector.map { it / norm }.toFloatArray()
+    }
+
+    // Helper: Preprocess bitmap to tensor
+    private fun preprocessBitmap(bitmap: Bitmap): Array<Array<Array<FloatArray>>> {
+        val inputSize = 224
+        val scaled = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        val result = Array(1) { Array(3) { Array(inputSize) { FloatArray(inputSize) } } }
+
+        for (y in 0 until inputSize) {
+            for (x in 0 until inputSize) {
+                val px = scaled.getPixel(x, y)
+                result[0][0][y][x] = ((px shr 16 and 0xFF) / 255f - 0.481f) / 0.268f
+                result[0][1][y][x] = ((px shr 8 and 0xFF) / 255f - 0.457f) / 0.261f
+                result[0][2][y][x] = ((px and 0xFF) / 255f - 0.408f) / 0.225f
+            }
+        }
+        return result
+    }
+
 }

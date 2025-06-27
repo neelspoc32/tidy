@@ -15,6 +15,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -55,6 +56,7 @@ import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
 import android.widget.CheckBox
+import android.widget.ImageButton
 import android.widget.ProgressBar
 import androidx.activity.result.IntentSenderRequest
 import androidx.lifecycle.lifecycleScope
@@ -77,6 +79,7 @@ class SearchFragment : Fragment() {
     private var searchButton: Button? = null
     private var clearButton: Button? = null
     private var moveButton: Button? = null
+    private var cameraSearchButton: ImageButton? = null
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mORTTextViewModel: ORTTextViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
@@ -95,6 +98,8 @@ class SearchFragment : Fragment() {
     private lateinit var folderPickerLauncher: ActivityResultLauncher<Uri?> // Added RequiresApi below
     private lateinit var storagePermissionLauncher: ActivityResultLauncher<Array<String>> // Added RequiresApi below
     private lateinit var manageStorageLauncher: ActivityResultLauncher<Intent> // Added RequiresApi below
+    private lateinit var cameraPermissionLauncher : ActivityResultLauncher<String>
+    private lateinit var takePictureLauncher : ActivityResultLauncher<Void?>
     private var operationProgressBar: ProgressBar? = null
     private var progressOverlay: View? = null
     // 1. Add the TextView declaration
@@ -184,6 +189,28 @@ class SearchFragment : Fragment() {
         folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             uri?.let { moveImagesToFolder(it) }
         }
+
+        cameraPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                takePictureLauncher.launch(null)
+            } else {
+                Toast.makeText(requireContext(), "Camera permission is required.", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+       takePictureLauncher = registerForActivityResult(
+            ActivityResultContracts.TakePicturePreview()
+        ) { bitmap: Bitmap? ->
+            if (bitmap != null) {
+                Log.d("CameraSearch", "Bitmap received from camera. Starting embedding...")
+                onCameraImageCaptured(bitmap)
+            } else {
+                Log.e("CameraSearch", "Bitmap is null. User may have cancelled.")
+            }
+        }
+
     }
 
     // --- START: onResume with Consistency Check ---
@@ -314,6 +341,7 @@ class SearchFragment : Fragment() {
         selectedCountTextView = view.findViewById<TextView>(R.id.selectedCountTextView)
         operationProgressBar = view.findViewById(R.id.operationProgressBar)
         progressOverlay = view.findViewById(R.id.progress_overlay)
+        cameraSearchButton = view.findViewById<ImageButton>(R.id.cameraSearchButton)
         // 2. Find the TextView in onCreateView or onViewCreated
         operationProgressText = view.findViewById(R.id.operationProgressText)
         selectAllCheckbox = view.findViewById(R.id.selectAllCheckbox)
@@ -550,6 +578,15 @@ class SearchFragment : Fragment() {
                 return@setOnClickListener
             }
             showDeleteConfirmationDialog(selectedIds)
+        }
+
+        cameraSearchButton?.setOnClickListener {
+            if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED) {
+                takePictureLauncher.launch(null)
+            } else {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
         }
 
         findNavController().currentBackStackEntry
@@ -1511,4 +1548,34 @@ class SearchFragment : Fragment() {
         }
     }
 
+    private fun onCameraImageCaptured(bitmap: Bitmap) {
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                // 1️⃣ Compute embedding using CLIP image model
+                val imageEmbedding = mORTImageViewModel.getImageEmbedding(bitmap)
+                Log.d("CameraSearch", "Embedding calculated: ${imageEmbedding.take(5)}...")
+
+                // 2️⃣ Sort against all existing image embeddings
+                mSearchViewModel.sortByCosineDistance(
+                    imageEmbedding,
+                    mORTImageViewModel.embeddingsList,
+                    mORTImageViewModel.idxList
+                )
+                Log.d("CameraSearch", "Search complete. Top result ID: ${mSearchViewModel.searchResults?.firstOrNull()}")
+
+                // 3️⃣ Update adapter on main thread
+                withContext(Dispatchers.Main) {
+                    val resultEmbeddings = getEmbeddingsForIds(mSearchViewModel.searchResults ?: emptyList())
+                    imageAdapter.updateData(resultEmbeddings)
+                    recyclerView.scrollToPosition(0)
+                    Toast.makeText(requireContext(), "Search complete!", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("CameraSearch", "Error during camera image processing", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Failed to process image.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 }

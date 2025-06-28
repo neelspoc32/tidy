@@ -54,7 +54,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         ProcessingStatus(isProcessing = true, messageResId = R.string.index_status_initializing)
     )
     val mProcessingStatus: LiveData<ProcessingStatus> = _mProcessingStatus
-
+    val isDataReady = MutableLiveData<Boolean>(false)
     private var repository: ImageEmbeddingRepository
     var embeddingsList: List<FloatArray> = listOf()
     var idxList: List<Long> = listOf()
@@ -681,6 +681,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 idxList = allEmbeddingsData.map { it.internalId }
                 fullEmbeddingData = allEmbeddingsData
                 embeddingMap = allEmbeddingsData.associateBy { it.internalId }
+                isDataReady.postValue(true)
                 Log.d(
                     "ORTImageViewModel",
                     "Loaded ${embeddingsList.size} embeddings with internal IDs."

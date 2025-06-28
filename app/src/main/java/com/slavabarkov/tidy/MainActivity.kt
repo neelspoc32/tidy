@@ -4,11 +4,14 @@
 
 package com.slavabarkov.tidy
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log // Added Log import
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.navigation.NavController
+import androidx.navigation.NavOptions
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp // Keep this import
@@ -46,6 +49,11 @@ class MainActivity : AppCompatActivity() {
             // The setupActionBarWithNavController should handle UI updates like the Up arrow visibility.
         }
         // --- END: Added Destination Change Listener ---
+
+        // Start of new implementation for shared image handling
+        // This part handles the initial launch with a shared intent (cold start)
+        handleSharedImageIntent(intent)
+        // End of new implementation for shared image handling
     }
 
     // --- START: Modified onSupportNavigateUp ---
@@ -70,4 +78,31 @@ class MainActivity : AppCompatActivity() {
         // --- End Previous attempt ---
     }
     // --- END: Modified onSupportNavigateUp ---
+    // Start of new implementation for onNewIntent
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        // This part handles new shared intents when the activity is already running
+        handleSharedImageIntent(intent)
+    }
+    // End of new implementation for onNewIntent
+
+    // New helper function to encapsulate shared image intent handling logic
+    private fun handleSharedImageIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+            val imageUri: Uri? = intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            imageUri?.let {
+                val bundle = Bundle().apply {
+                    putString("sharedImageUri", it.toString()) // Pass the URI as a string
+                }
+                // Navigate directly to SearchFragment and clear the back stack
+                navController.navigate(
+                    R.id.searchFragment,
+                    bundle,
+                    NavOptions.Builder()
+                        .setPopUpTo(navController.graph.startDestinationId, true) // Pop up to start destination (IndexFragment) inclusively
+                        .build()
+                )
+            }
+        }
+    }
 }

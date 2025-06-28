@@ -73,6 +73,7 @@ import com.slavabarkov.tidy.data.ImageEmbedding
 import com.slavabarkov.tidy.utils.FastScrollHelper
 import com.slavabarkov.tidy.utils.GalleryNavigationHelper
 import kotlinx.coroutines.withContext
+import java.io.InputStream
 
 class SearchFragment : Fragment() {
     private var searchText: TextView? = null
@@ -377,7 +378,7 @@ class SearchFragment : Fragment() {
             initialEmbeddingList,
             onItemClick = { clickedItem ->
                 val bundle = GalleryNavigationHelper.buildGalleryArgs(
-                    initialEmbeddingList,
+                    getEmbeddingsForIds(mSearchViewModel.searchResults ?: emptyList()),
                     clickedItem,
                     selectedIds = mSearchViewModel.selectedItemIds.value ?: emptySet()
                 )
@@ -506,7 +507,10 @@ class SearchFragment : Fragment() {
             try {
                 if (::selectionTracker.isInitialized) {
                     selectionTracker.onRestoreInstanceState(savedInstanceState)
-                    Log.d("SelectionState", "Restored selection from savedInstanceState. Count: ${selectionTracker.selection.size()}")
+                    Log.d(
+                        "SelectionState",
+                        "Restored selection from savedInstanceState. Count: ${selectionTracker.selection.size()}"
+                    )
                 }
             } catch (e: Exception) {
                 Log.e("SelectionState", "Error restoring selection from savedInstanceState", e)
@@ -519,9 +523,15 @@ class SearchFragment : Fragment() {
                 try {
                     if (::selectionTracker.isInitialized) {
                         selectionTracker.setItemsSelected(savedSelection, true)
-                        Log.d("SelectionState", "Restored from ViewModel. Has Selection NOW: ${selectionTracker.hasSelection()}, Count: ${selectionTracker.selection.size()}")
+                        Log.d(
+                            "SelectionState",
+                            "Restored from ViewModel. Has Selection NOW: ${selectionTracker.hasSelection()}, Count: ${selectionTracker.selection.size()}"
+                        )
                     } else {
-                        Log.e("SelectionState", "Cannot restore from ViewModel, tracker not initialized.")
+                        Log.e(
+                            "SelectionState",
+                            "Cannot restore from ViewModel, tracker not initialized."
+                        )
                     }
                 } catch (e: Exception) {
                     Log.e("SelectionState", "Error restoring selection from ViewModel", e)
@@ -608,6 +618,21 @@ class SearchFragment : Fragment() {
         }
 
         Log.d("LifecycleDebug", "onViewCreated finished")
+        val sharedImageUriString = arguments?.getString("sharedImageUri")
+        if (sharedImageUriString != null) {
+            Log.d(
+                "SearchFragment",
+                "Shared Image URI received: $sharedImageUriString"
+            ) // Debug log 1
+            val sharedImageUri = Uri.parse(sharedImageUriString)
+            mORTImageViewModel.isDataReady.observe(viewLifecycleOwner) { ready ->
+                if (ready) {
+                    processSharedImageUri(sharedImageUri)
+                    arguments?.remove("sharedImageUri")
+                }
+            }
+
+        }
     }
     // --- END: Observe uiOperationInProgress ---
 
@@ -1504,6 +1529,102 @@ class SearchFragment : Fragment() {
              requestAppropriateStoragePermissions()
         }
     }
+
+    // Start of new function for shared image processing
+    private fun processSharedImageUri(imageUri: Uri) {
+
+        mSearchViewModel.setUiOperationInProgress(true)
+        operationProgressText?.visibility = View.VISIBLE
+
+        Log.d("SharedImageSearch", "Starting processSharedImageUri for URI: $imageUri")
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            var bitmap: Bitmap? = null
+            var inputStream: InputStream? = null
+            try {
+                bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val source = android.graphics.ImageDecoder.createSource(requireContext().contentResolver, imageUri)
+                    android.graphics.ImageDecoder.decodeBitmap(source)
+                } else {
+                    inputStream = requireContext().contentResolver.openInputStream(imageUri)
+                    android.graphics.BitmapFactory.decodeStream(inputStream)
+                }
+                Log.d("SharedImageSearch", "Bitmap loaded: ${bitmap != null}. Config: ${bitmap?.config}") // Updated log
+
+                bitmap?.let { originalBitmap ->
+                    // --- START Fix for Config#HARDWARE bitmap ---
+                    val mutableBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                    Log.d("SharedImageSearch", "Copied to mutable Bitmap. New Config: ${mutableBitmap.config}")
+                    // --- END Fix ---
+
+                        // Check if image embeddings are loaded
+                        if (mORTImageViewModel.embeddingsList.isEmpty() || mORTImageViewModel.idxList.isEmpty()) {
+                            Log.e(
+                                "SharedImageSearch",
+                                "Image embeddings not loaded! Cannot perform search."
+                            )
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Image database not ready. Please re-index.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+
+                                mSearchViewModel.setUiOperationInProgress(false)
+                                operationProgressText?.visibility = View.GONE
+                            }
+                            return@launch
+                        }
+
+                    val imageEmbedding = mORTImageViewModel.getImageEmbedding(mutableBitmap) // Use the mutableBitmap
+                    Log.d("SharedImageSearch", "Image embedding generated (first 5): ${imageEmbedding.take(5)}...")
+
+                    mSearchViewModel.sortByCosineDistance(
+                        imageEmbedding,
+                        mORTImageViewModel.embeddingsList,
+                        mORTImageViewModel.idxList
+                    )
+                    Log.d("SharedImageSearch", "Search results count: ${mSearchViewModel.searchResults?.size ?: 0}")
+
+                    withContext(Dispatchers.Main) {
+                        mSearchViewModel.clearSavedSelection()
+
+                        val resultEmbeddings = getEmbeddingsForIds(mSearchViewModel.searchResults ?: emptyList())
+                        Log.d("SharedImageSearch", "Results for adapter count: ${resultEmbeddings.size}")
+                        imageAdapter.updateData(resultEmbeddings)
+                        recyclerView.scrollToPosition(0)
+                        Toast.makeText(requireContext(), "Shared image search complete!", Toast.LENGTH_SHORT).show()
+
+                        val totalItemsInView = imageAdapter.itemCount
+                        selectedCountTextView?.text = "$totalItemsInView Images"
+                        Log.d("SharedImageSearch", "UI updated. Total images displayed: $totalItemsInView")
+
+
+                        mSearchViewModel.setUiOperationInProgress(false)
+                        operationProgressText?.visibility = View.GONE
+                    }
+                } ?: run {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Failed to load shared image.", Toast.LENGTH_SHORT).show()
+
+                        mSearchViewModel.setUiOperationInProgress(false)
+                        operationProgressText?.visibility = View.GONE
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("SharedImageSearch", "Error during shared image processing", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Failed to process shared image: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+
+                    mSearchViewModel.setUiOperationInProgress(false)
+                    operationProgressText?.visibility = View.GONE
+                }
+            } finally {
+                inputStream?.close()
+            }
+        }
+    }
+    // End of new function for shared image processing
 
     // Helper function within SearchFragment
     private fun getEmbeddingsForIds(internalIds: List<Long>): List<ImageEmbedding> {

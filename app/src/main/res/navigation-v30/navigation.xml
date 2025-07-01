@@ -21,6 +21,9 @@
         android:label="Search"
         tools:layout="@layout/fragment_search">
         <action
+            android:id="@+id/action_searchFragment_to_indexFragment"
+            app:destination="@id/indexFragment" />
+        <action
             android:id="@+id/action_searchFragment_to_imageFragment"
             app:destination="@id/imageFragment" />
         <action

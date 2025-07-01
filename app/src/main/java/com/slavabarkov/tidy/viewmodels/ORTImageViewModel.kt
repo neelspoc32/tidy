@@ -47,21 +47,36 @@ data class ProcessingStatus(
     val maxProgress: Int = 100
 )
 
+// Define an enum to represent the indexing scope status
+enum class IndexingScopeStatus {
+    NONE, // No indexing has been done, or data has been cleared
+    FULL_DEVICE_INDEXED, // Entire device media store has been indexed
+    FOLDER_INDEXED // A specific folder has been indexed
+}
+
 // ViewModel needs Application context now
+@SuppressLint("StaticFieldLeak")
 class ORTImageViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _mProcessingStatus = MutableLiveData(
         ProcessingStatus(isProcessing = true, messageResId = R.string.index_status_initializing)
     )
     val mProcessingStatus: LiveData<ProcessingStatus> = _mProcessingStatus
-    val isDataReady = MutableLiveData<Boolean>(false)
+    // LiveData to indicate if the image database is ready (loaded from disk)
+    private val _isDataReady = MutableLiveData<Boolean>()
+    val isDataReady: LiveData<Boolean> get() = _isDataReady
+
     private var repository: ImageEmbeddingRepository
     var embeddingsList: List<FloatArray> = listOf()
     var idxList: List<Long> = listOf()
     private var fullEmbeddingData: List<ImageEmbedding> = listOf() // Load this in loadEmbeddingsFromDb
     private var embeddingMap: Map<Long, ImageEmbedding> = mapOf()
     private val embeddingDim = 512 // Assuming CLIP ViT-B/32
+    // LiveData to hold the current indexing scope status
+    private val _indexingScopeStatus = MutableLiveData<IndexingScopeStatus>()
+    val indexingScopeStatus: LiveData<IndexingScopeStatus> get() = _indexingScopeStatus
 
+    private val context = application.applicationContext
     // --- Database Access ---
     private val db = Room.databaseBuilder(
         application.applicationContext,
@@ -153,6 +168,15 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             Log.d("ORTImageViewModel", "Finished loading embeddings from DB. Status set to: $finalStatusMsg"
             )
         }
+
+        // Load persisted indexing scope status on ViewModel initialization
+        _indexingScopeStatus.value = PreferencesHelper.getIndexingScopeStatus(context)
+
+        Log.d("ORTImageViewModel", "Initial Indexing Scope Status loaded: ${_indexingScopeStatus.value}")
+//        viewModelScope.launch(Dispatchers.IO) {
+//        // Load embeddings and indices from the database
+//        loadEmbeddingsFromDb()
+//        }
     }
 
 
@@ -168,6 +192,15 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 embeddingMap = emptyMap()
                 // Clear database
                 imageEmbeddingDao.clearAll()
+                // After all deletions, if data list became empty, reset status
+//                if (embeddingsList.isEmpty()) {
+//                withContext(Dispatchers.Main) {
+//                   _indexingScopeStatus.value = IndexingScopeStatus.NONE
+//                   PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.NONE)
+//                    PreferencesHelper.saveSelectedFolderUri(context, null) // Clear folder URI too
+//
+//                Log.d("ORTImageViewModel", "All images deleted, status reset to NONE.")
+//                }
                 Log.d("ORTImageViewModel", "Embeddings cleared.")
                 withContext(Dispatchers.Main) { onComplete(true) }
             } catch (e: Exception) {
@@ -208,9 +241,22 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                         "No folder selected, indexing all MediaStore images."
                     )
                     indexMediaStoreImages() // This function should handle its own final success/error status
+                    // Set status to FULL_DEVICE_INDEXED upon successful full indexing
+                    withContext(Dispatchers.Main) {
+                        _indexingScopeStatus.value = IndexingScopeStatus.FULL_DEVICE_INDEXED
+                        PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.FULL_DEVICE_INDEXED)
+                        Log.d("ORTImageViewModel", "Indexing Scope Status updated to FULL_DEVICE_INDEXED")
+                    }
                 } else {
                     Log.i("ORTImageViewModel", "Folder selected, indexing: $selectedFolderUri")
                     indexSpecificFolder(selectedFolderUri) // This function should handle its own final success/error status
+                    // Set status to FOLDER_INDEXED upon successful folder indexing
+                    withContext(Dispatchers.Main) {
+                        _indexingScopeStatus.value = IndexingScopeStatus.FOLDER_INDEXED
+                        PreferencesHelper.saveSelectedFolderUri(context, selectedFolderUri) // Also save folder URI
+                        PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.FOLDER_INDEXED)
+                        Log.d("ORTImageViewModel", "Indexing Scope Status updated to FOLDER_INDEXED for URI: $selectedFolderUri")
+                    }
                 }
                 success = true // Assume success if no exception bubbles up here
 
@@ -568,7 +614,9 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         } finally {
             // Ensure the InputStream is always closed
             try {
-                inputStream?.close()
+                withContext(Dispatchers.IO) {
+                    inputStream?.close()
+                }
             } catch (ioe: IOException) {
                 Log.e("ORTImageViewModel", "Error closing input stream for $imageUri", ioe)
             }
@@ -681,7 +729,35 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 idxList = allEmbeddingsData.map { it.internalId }
                 fullEmbeddingData = allEmbeddingsData
                 embeddingMap = allEmbeddingsData.associateBy { it.internalId }
-                isDataReady.postValue(true)
+                //_isDataReady.postValue(true)
+
+
+                withContext(Dispatchers.Main) {
+                    _isDataReady.value = true
+                    Log.d("ORTImageViewModel", "Embeddings loaded from DB. Count: ${embeddingsList.size}")
+                    // After loading, update indexing status if it was NONE but we found data
+                    if (_indexingScopeStatus.value == IndexingScopeStatus.NONE && embeddingsList.isNotEmpty()) {
+                        // This case might happen if preferences were cleared but DB wasn't, or initial app install
+                        // We can try to infer based on selected folder URI
+                        val selectedFolderUri = PreferencesHelper.getSelectedFolderUri(context)
+                        if (selectedFolderUri != null) {
+                            _indexingScopeStatus.value = IndexingScopeStatus.FOLDER_INDEXED
+                            Log.d("ORTImageViewModel", "Inferred status: FOLDER_INDEXED (data found and folder URI exists)")
+                        } else {
+                            // If no folder URI, assume full scan was done if data exists
+                            _indexingScopeStatus.value = IndexingScopeStatus.FULL_DEVICE_INDEXED
+                            Log.d("ORTImageViewModel", "Inferred status: FULL_DEVICE_INDEXED (data found and no folder URI)")
+                        }
+                        // Persist the inferred status
+                        PreferencesHelper.saveIndexingScopeStatus(context, _indexingScopeStatus.value!!)
+                    } else if (_indexingScopeStatus.value != IndexingScopeStatus.NONE && embeddingsList.isEmpty()){
+                        // If status says something but DB is empty, reset status
+                        _indexingScopeStatus.value = IndexingScopeStatus.NONE
+                        PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.NONE)
+                        Log.d("ORTImageViewModel", "Reset status to NONE: DB empty but preferences indicated otherwise.")
+                    }
+                }
+
                 Log.d(
                     "ORTImageViewModel",
                     "Loaded ${embeddingsList.size} embeddings with internal IDs."
@@ -693,6 +769,9 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 idxList = emptyList()
                 fullEmbeddingData = emptyList()
                 embeddingMap = emptyMap()
+                withContext(Dispatchers.Main) {
+                    _isDataReady.value = false
+                }
             }
         }
     }

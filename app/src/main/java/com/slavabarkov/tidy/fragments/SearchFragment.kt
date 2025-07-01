@@ -52,6 +52,7 @@ import android.text.style.ForegroundColorSpan
 import android.text.Spannable
 import android.text.style.StyleSpan
 import android.graphics.Typeface
+import android.text.SpannableStringBuilder
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
@@ -72,6 +73,8 @@ import androidx.recyclerview.widget.GridLayoutManager
 import com.slavabarkov.tidy.data.ImageEmbedding
 import com.slavabarkov.tidy.utils.FastScrollHelper
 import com.slavabarkov.tidy.utils.GalleryNavigationHelper
+import com.slavabarkov.tidy.utils.PreferencesHelper
+import com.slavabarkov.tidy.viewmodels.IndexingScopeStatus
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 
@@ -620,10 +623,9 @@ class SearchFragment : Fragment() {
         Log.d("LifecycleDebug", "onViewCreated finished")
         val sharedImageUriString = arguments?.getString("sharedImageUri")
         if (sharedImageUriString != null) {
-            Log.d(
-                "SearchFragment",
-                "Shared Image URI received: $sharedImageUriString"
-            ) // Debug log 1
+            Log.d("ShareFragment", "Shared Image URI received: $sharedImageUriString")
+            mSearchViewModel.setUiOperationInProgress(true)
+            operationProgressText?.visibility = View.VISIBLE
             val sharedImageUri = Uri.parse(sharedImageUriString)
             mORTImageViewModel.isDataReady.observe(viewLifecycleOwner) { ready ->
                 if (ready) {
@@ -1498,6 +1500,8 @@ class SearchFragment : Fragment() {
         val operationInProgress = mSearchViewModel.uiOperationInProgress.value ?: false
         moveButton?.visibility = if (hasSelection) View.VISIBLE else View.GONE
         deleteButton.visibility = if (hasSelection) View.VISIBLE else View.GONE
+        Log.d("ShareFragment","In updateselectiongui after cleaning move delete")
+        Log.d("ShareFragment", " Inside isshareduri ${arguments?.getString("sharedImageUri")}")
         //selectedCountTextView?.visibility = if (hasSelection) View.VISIBLE else View.GONE
 
         moveButton?.isEnabled = hasSelection && !operationInProgress && hasStoragePermission()
@@ -1530,101 +1534,173 @@ class SearchFragment : Fragment() {
         }
     }
 
-    // Start of new function for shared image processing
+    /**
+     * Handles an incoming shared image URI, presenting dialogs based on indexing status.
+     * This function ensures the flow is paused until the user makes a decision.
+     */
     private fun processSharedImageUri(imageUri: Uri) {
-
-        mSearchViewModel.setUiOperationInProgress(true)
-        operationProgressText?.visibility = View.VISIBLE
-
-        Log.d("SharedImageSearch", "Starting processSharedImageUri for URI: $imageUri")
-
-        lifecycleScope.launch(Dispatchers.Default) {
-            var bitmap: Bitmap? = null
-            var inputStream: InputStream? = null
-            try {
-                bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    val source = android.graphics.ImageDecoder.createSource(requireContext().contentResolver, imageUri)
-                    android.graphics.ImageDecoder.decodeBitmap(source)
+        Log.d("SearchFragment", "handleSharedImage called for URI: $imageUri")
+        val indexingStatus = mORTImageViewModel.indexingScopeStatus.value ?: IndexingScopeStatus.NONE
+        val isDataAvailable = mORTImageViewModel.embeddingsList.isNotEmpty()
+    Log.d("SearchFragment","Indexing status: ${mORTImageViewModel.indexingScopeStatus.value}")
+        when (indexingStatus) {
+            IndexingScopeStatus.NONE -> {
+                Log.d("SearchFragment", "Data. ${isDataAvailable}")
+                if (!isDataAvailable) {
+                    Log.d("SearchFragment", "Status: NONE and no data. Showing no-index prompt.")
+                    showNoIndexingPromptDialog(imageUri)
                 } else {
-                    inputStream = requireContext().contentResolver.openInputStream(imageUri)
-                    android.graphics.BitmapFactory.decodeStream(inputStream)
+                    // This case should ideally not happen if logic in ORTImageViewModel is robust
+                    // but as a fallback, treat as full index or re-prompt based on actual data presence.
+                    // For safety, let's treat it as potentially incomplete and prompt.
+                    Log.w("SearchFragment", "Status: NONE but data IS available. Inconsistency detected. Prompting as partial.")
+                    showIndexingPromptDialog(IndexingScopeStatus.FOLDER_INDEXED, imageUri) // Treat as partial for safety
                 }
-                Log.d("SharedImageSearch", "Bitmap loaded: ${bitmap != null}. Config: ${bitmap?.config}") // Updated log
-
-                bitmap?.let { originalBitmap ->
-                    // --- START Fix for Config#HARDWARE bitmap ---
-                    val mutableBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
-                    Log.d("SharedImageSearch", "Copied to mutable Bitmap. New Config: ${mutableBitmap.config}")
-                    // --- END Fix ---
-
-                        // Check if image embeddings are loaded
-                        if (mORTImageViewModel.embeddingsList.isEmpty() || mORTImageViewModel.idxList.isEmpty()) {
-                            Log.e(
-                                "SharedImageSearch",
-                                "Image embeddings not loaded! Cannot perform search."
-                            )
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(
-                                    requireContext(),
-                                    "Image database not ready. Please re-index.",
-                                    Toast.LENGTH_LONG
-                                ).show()
-
-                                mSearchViewModel.setUiOperationInProgress(false)
-                                operationProgressText?.visibility = View.GONE
-                            }
-                            return@launch
-                        }
-
-                    val imageEmbedding = mORTImageViewModel.getImageEmbedding(mutableBitmap) // Use the mutableBitmap
-                    Log.d("SharedImageSearch", "Image embedding generated (first 5): ${imageEmbedding.take(5)}...")
-
-                    mSearchViewModel.sortByCosineDistance(
-                        imageEmbedding,
-                        mORTImageViewModel.embeddingsList,
-                        mORTImageViewModel.idxList
-                    )
-                    Log.d("SharedImageSearch", "Search results count: ${mSearchViewModel.searchResults?.size ?: 0}")
-
-                    withContext(Dispatchers.Main) {
-                        mSearchViewModel.clearSavedSelection()
-
-                        val resultEmbeddings = getEmbeddingsForIds(mSearchViewModel.searchResults ?: emptyList())
-                        Log.d("SharedImageSearch", "Results for adapter count: ${resultEmbeddings.size}")
-                        imageAdapter.updateData(resultEmbeddings)
-                        recyclerView.scrollToPosition(0)
-                        Toast.makeText(requireContext(), "Shared image search complete!", Toast.LENGTH_SHORT).show()
-
-                        val totalItemsInView = imageAdapter.itemCount
-                        selectedCountTextView?.text = "$totalItemsInView Images"
-                        Log.d("SharedImageSearch", "UI updated. Total images displayed: $totalItemsInView")
-
-
-                        mSearchViewModel.setUiOperationInProgress(false)
-                        operationProgressText?.visibility = View.GONE
-                    }
-                } ?: run {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "Failed to load shared image.", Toast.LENGTH_SHORT).show()
-
-                        mSearchViewModel.setUiOperationInProgress(false)
-                        operationProgressText?.visibility = View.GONE
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SharedImageSearch", "Error during shared image processing", e)
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "Failed to process shared image: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-
-                    mSearchViewModel.setUiOperationInProgress(false)
-                    operationProgressText?.visibility = View.GONE
-                }
-            } finally {
-                inputStream?.close()
+            }
+            IndexingScopeStatus.FOLDER_INDEXED -> {
+                Log.d("SearchFragment", "Status: FOLDER_INDEXED. Showing folder-indexed prompt.")
+                showIndexingPromptDialog(IndexingScopeStatus.FOLDER_INDEXED, imageUri)
+            }
+            IndexingScopeStatus.FULL_DEVICE_INDEXED -> {
+                Log.d("SearchFragment", "Status: FULL_DEVICE_INDEXED. Proceeding directly with search.")
+                processImageForSearch(imageUri)
             }
         }
     }
-    // End of new function for shared image processing
+
+    private fun showNoIndexingPromptDialog(imageUri: Uri) {
+        Log.d("SearchFragment","Inside No Images Indexed")
+        val title = "No Images Indexed"
+        val messageBuilder = SpannableStringBuilder()
+        messageBuilder.append("It looks like you haven't indexed any images yet.\n\n")
+        messageBuilder.append("For the best search results, please index your ")
+        messageBuilder.append(createBoldSpannable("entire photo library")).append(".\n\n")
+        messageBuilder.append("Would you like to go to the indexing screen now?")
+
+        AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setMessage(messageBuilder)
+            .setCancelable(false) // Make it modal
+            .setPositiveButton("Go to Indexing") { dialog, _ ->
+                Log.d("SearchFragment", "User chose 'Go to Indexing' (from no-index prompt).")
+                dialog.dismiss()
+                // Navigate to IndexFragment, indicating a request for full index
+                findNavController().navigate(R.id.action_searchFragment_to_indexFragment) // No specific argument for now, assume IndexFragment default to full
+            }
+            .setNegativeButton("Cancel") { dialog, _ ->
+                Log.d("SearchFragment", "User chose 'Cancel' (from no-index prompt).")
+                dialog.dismiss()
+                Toast.makeText(requireContext(), "Shared image search cancelled.", Toast.LENGTH_SHORT).show()
+                requireActivity().finish()
+                // Do not proceed with search
+            }
+            .show()
+    }
+
+    private fun showIndexingPromptDialog(currentStatus: IndexingScopeStatus, imageUri: Uri) {
+        Log.d("SearchFragment","Inside Showing Images Indexed")
+        val title = "Indexing Scope Limited"
+        val messageBuilder = SpannableStringBuilder()
+
+        when (currentStatus) {
+            IndexingScopeStatus.FOLDER_INDEXED -> {
+                Log.d("ShareFragment","Alert dialog")
+                val folderUri = PreferencesHelper.getSelectedFolderUri(requireContext())
+                val folderName = folderUri?.let { PreferencesHelper.getFolderName(requireContext(), it) }
+                messageBuilder.append("You have currently indexed only the folder: ")
+                messageBuilder.append(createBoldSpannable(folderName ?: "Selected Folder")).append(".\n\n")
+                messageBuilder.append("Searching for this image against your ")
+                messageBuilder.append(createBoldSpannable("entire photo library"))
+                messageBuilder.append(" might yield more relevant results.\n\n")
+                messageBuilder.append("What would you like to do?")
+            }
+            // If somehow we get here with NONE or FULL_DEVICE_INDEXED (which shouldn't happen for this dialog),
+            // provide a generic message. This is a safeguard.
+            else -> {
+                messageBuilder.append("Your image database is not fully comprehensive.\n\n")
+                messageBuilder.append("Indexing your ")
+                messageBuilder.append(createBoldSpannable("entire photo library"))
+                messageBuilder.append(" will improve search accuracy.\n\n")
+                messageBuilder.append("What would you like to do?")
+            }
+        }
+
+
+        AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setMessage(messageBuilder)
+            .setCancelable(false) // Make it modal
+            .setPositiveButton("Index Full Phone") { dialog, _ ->
+                Log.d("SearchFragment", "User chose 'Index Full Phone'.")
+                dialog.dismiss()
+                mSearchViewModel.setUiOperationInProgress(false)
+                operationProgressText?.visibility = View.GONE
+                findNavController().navigate(R.id.action_searchFragment_to_indexFragment)
+            }
+            .setNegativeButton("Search in Current Index") { dialog, _ ->
+                Log.d("SearchFragment", "User chose 'Search in Current Index'.")
+                dialog.dismiss()
+                processImageForSearch(imageUri) // Proceed with the search
+            }
+            .setNeutralButton("Cancel") { dialog, _ ->
+                Log.d("SearchFragment", "User chose 'Cancel' (from indexing prompt).")
+                mSearchViewModel.setUiOperationInProgress(false)
+                operationProgressText?.visibility = View.GONE
+                dialog.dismiss()
+                Toast.makeText(requireContext(), "Shared image search cancelled.", Toast.LENGTH_SHORT).show()
+                requireActivity().finish()
+            }
+            .show()
+    }
+
+
+    /**
+     * The core logic for processing an image URI for search.
+     * This function is called only after indexing status checks are passed or user confirms.
+     */
+    private fun processImageForSearch(imageUri: Uri) {
+        Log.d("SearchFragment", "Processing shared image for search: $imageUri")
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Load bitmap from URI
+                val bitmap = MediaStore.Images.Media.getBitmap(requireContext().contentResolver, imageUri)
+                Log.d("SearchFragment", "Bitmap loaded from URI.")
+
+                // 1️⃣ Compute embedding using CLIP image model
+                val imageEmbedding = mORTImageViewModel.getImageEmbedding(bitmap)
+                Log.d("SearchFragment", "Embedding calculated: ${imageEmbedding.take(5)}...")
+
+                // 2️⃣ Sort against all existing image embeddings
+                mSearchViewModel.sortByCosineDistance(
+                    imageEmbedding,
+                    mORTImageViewModel.embeddingsList,
+                    mORTImageViewModel.idxList
+                )
+                Log.d("SearchFragment", "Search complete. Top result ID: ${mSearchViewModel.searchResults?.firstOrNull()}")
+
+                // 3️⃣ Update adapter on main thread
+                withContext(Dispatchers.Main) {
+                    val resultEmbeddings = getEmbeddingsForIds(mSearchViewModel.searchResults ?: emptyList())
+                    imageAdapter.updateData(resultEmbeddings)
+                    recyclerView.scrollToPosition(0)
+                    val totalItemsInView = imageAdapter.itemCount
+                    listCount = totalItemsInView
+                    selectedCountTextView?.text = "$totalItemsInView Images"
+                    Log.d("SharedImageSearch", "UI updated. Total images displayed: $totalItemsInView")
+                    Toast.makeText(requireContext(), "Search complete!", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("SearchFragment", "Error during shared image processing", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Failed to process shared image.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            finally {
+                mSearchViewModel.setUiOperationInProgress(false)
+                operationProgressText?.visibility = View.GONE
+            }
+        }
+    }
 
     // Helper function within SearchFragment
     private fun getEmbeddingsForIds(internalIds: List<Long>): List<ImageEmbedding> {
@@ -1698,5 +1774,14 @@ class SearchFragment : Fragment() {
                 }
             }
         }
+    }
+
+    // Helper function to create bold spannable text
+    private fun createBoldSpannable(text: String): SpannableString {
+        val spannable = SpannableString(text)
+        spannable.setSpan(StyleSpan(Typeface.BOLD), 0, text.length, SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE)
+        // You could also add ForegroundColorSpan here if you want a different color for bold text
+        // spannable.setSpan(ForegroundColorSpan(ContextCompat.getColor(requireContext(), R.color.your_highlight_color)), 0, text.length, SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return spannable
     }
 }

@@ -85,7 +85,7 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
         }
 
         // Use the stable internalId for selection tracking
-        val itemInternalId = itemEmbedding.internalId
+        val itemStableId = itemEmbedding.contentId
         // --- Determine the correct URI to load ---
         val imageUriToLoad: Uri? = when {
             !itemEmbedding.documentUri.isNullOrBlank() -> {
@@ -94,7 +94,7 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
                 } catch (e: Exception) {
                     Log.e(
                         "ImageAdapter",
-                        "Error parsing document URI: ${itemEmbedding.documentUri} for internalId $itemInternalId",
+                        "Error parsing document URI: ${itemEmbedding.documentUri} for internalId $itemStableId",
                         e
                     )
                     null
@@ -110,7 +110,7 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
                 } catch (e: Exception) {
                     Log.e(
                         "ImageAdapter",
-                        "Error building MediaStore URI for mediaStoreId: ${itemEmbedding.mediaStoreId} for internalId $itemInternalId",
+                        "Error building MediaStore URI for mediaStoreId: ${itemEmbedding.mediaStoreId} for internalId $itemStableId",
                         e
                     )
                     null
@@ -120,7 +120,7 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
             else -> {
                 Log.e(
                     "ImageAdapter",
-                    "ImageEmbedding has neither documentUri nor mediaStoreId for internalId: $itemInternalId"
+                    "ImageEmbedding has neither documentUri nor mediaStoreId for internalId: $itemStableId"
                 )
                 null
             }
@@ -130,7 +130,7 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
 
         // Load image using the determined URI with Glide
         if (imageUriToLoad != null) {
-            Log.d("AdapterDebug", "Loading URI for ID $itemInternalId: $imageUriToLoad")
+            Log.d("AdapterDebug", "Loading URI for ID $itemStableId: $imageUriToLoad")
             Glide.with(context)
                 .load(imageUriToLoad)
                 .placeholder(R.drawable.ic_baseline_image_24)
@@ -139,13 +139,13 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
                 .transition(DrawableTransitionOptions.withCrossFade())
                 .into(holder.imageView)
         } else {
-            Log.e("AdapterDebug", "URI is NULL for InternalID: $itemInternalId")
+            Log.e("AdapterDebug", "URI is NULL for InternalID: $itemStableId")
             holder.imageView.setImageResource(R.drawable.ic_baseline_broken_image_24)
         }
 
         // Selection State Handling
         // --- Selection State Handling (uses internalId now) ---
-        val isSelected = selectionTracker.isSelected(itemInternalId)
+        val isSelected = selectionTracker.isSelected(itemStableId)
         holder.itemView.isActivated = isSelected
         holder.checkBox.isChecked = isSelected
 
@@ -216,10 +216,10 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
 
         holder.checkBox.setOnClickListener {
             // Toggle selection using internalId
-            if (selectionTracker.isSelected(itemInternalId)) {
-                selectionTracker.deselect(itemInternalId)
+            if (selectionTracker.isSelected(itemStableId)) {
+                selectionTracker.deselect(itemStableId)
             } else {
-                selectionTracker.select(itemInternalId)
+                selectionTracker.select(itemStableId)
             }
         }
 
@@ -227,22 +227,22 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
         holder.imageView.setOnClickListener {
             if (selectionTracker.hasSelection()) {
                 // If selection is active, toggle selection
-                if (selectionTracker.isSelected(itemInternalId)) {
-                    selectionTracker.deselect(itemInternalId)
+                if (selectionTracker.isSelected(itemStableId)) {
+                    selectionTracker.deselect(itemStableId)
                 } else {
-                    selectionTracker.select(itemInternalId)
+                    selectionTracker.select(itemStableId)
                 }
             } else {
                 onItemClick?.invoke(itemEmbedding)
                 // Navigate using the determined URI and internalId
-                //performNavigation(imageUriToLoad, itemInternalId) // Call adapted performNavigation
+                //performNavigation(imageUriToLoad, itemStableId) // Call adapted performNavigation
             }
         }
 
         // --- Image Long Click Handling ---
         holder.imageView.setOnLongClickListener {
             if (!selectionTracker.hasSelection()) {
-                selectionTracker.select(itemInternalId)
+                selectionTracker.select(itemStableId)
                 return@setOnLongClickListener true // Consume the long click
             }
             false // Don't consume if selection already active
@@ -288,11 +288,11 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
         holder.enlargeButton.setOnClickListener { clickedView ->
             Log.d(
                 "ClickListenerDebug",
-                "EnlargeButton OnClickListener triggered for item internalId $itemInternalId"
+                "EnlargeButton OnClickListener triggered for item internalId $itemStableId"
             )
             onItemClick?.invoke(itemEmbedding)
             // Call the adapted navigation logic
-            //performNavigation(imageUriToLoad, itemInternalId)
+            //performNavigation(imageUriToLoad, itemStableId)
         }
         // *** END Listener Setup ***
 
@@ -308,7 +308,7 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
         override fun getItemId(position: Int): Long {
             // Check bounds to prevent crash if dataset is modified unexpectedly
             return if (position >= 0 && position < dataset.size) {
-                dataset[position].internalId
+                dataset[position].contentId
             } else {
                 RecyclerView.NO_ID // Return invalid ID if position is out of bounds
             }

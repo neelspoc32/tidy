@@ -123,7 +123,7 @@ class RecycleBinFragment : Fragment() {
         }
 //        selectAllCheckBox.setOnCheckedChangeListener { _, isChecked ->
 //            if (isChecked) {
-//                trashedItems.forEach { selectionTracker.select(it.internalId) }
+//                trashedItems.forEach { selectionTracker.select(it.contentId) }
 //            } else {
 //                selectionTracker.clearSelection()
 //            }
@@ -159,7 +159,7 @@ class RecycleBinFragment : Fragment() {
 
         restoreButton.setOnClickListener {
             val selectedIds = selectionTracker.selection.toList()
-            val urisToRestore = trashedItems.filter { selectedIds.contains(it.internalId) }.mapNotNull {
+            val urisToRestore = trashedItems.filter { selectedIds.contains(it.contentId) }.mapNotNull {
                 it.mediaStoreId?.let { id -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id) }
             }
             if (urisToRestore.isNotEmpty()) {
@@ -167,7 +167,7 @@ class RecycleBinFragment : Fragment() {
                     val request = MediaStore.createTrashRequest(requireContext().contentResolver, urisToRestore, false)
                     val intentSender = IntentSenderRequest.Builder(request).build()
                     restoreResultLauncher.launch(intentSender)
-                    //trashedItems.removeAll { it.internalId in selectedIds }
+                    //trashedItems.removeAll { it.contentId in selectedIds }
                     //adapter.updateData(trashedItems)
                 } catch (e: Exception) {
                     Log.e("RecycleBinFragment", "Restore failed", e)
@@ -180,7 +180,7 @@ class RecycleBinFragment : Fragment() {
 
         deleteButton.setOnClickListener {
             val selectedIds = selectionTracker.selection.toList()
-            val urisToDelete = trashedItems.filter { selectedIds.contains(it.internalId) }.mapNotNull {
+            val urisToDelete = trashedItems.filter { selectedIds.contains(it.contentId) }.mapNotNull {
                 it.mediaStoreId?.let { id -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id) }
             }
             if (urisToDelete.isNotEmpty()) {
@@ -227,7 +227,7 @@ class RecycleBinFragment : Fragment() {
 //        val selectAllCheckBox = view.findViewById<CheckBox>(R.id.selectAllCheckBox)
 //        selectAllCheckBox.setOnCheckedChangeListener { _, isChecked ->
 //            if (isChecked) {
-//                trashedItems.forEach { selectionTracker.select(it.internalId) }
+//                trashedItems.forEach { selectionTracker.select(it.contentId) }
 //            } else {
 //                selectionTracker.clearSelection()
 //            }
@@ -301,7 +301,7 @@ class RecycleBinFragment : Fragment() {
 
     private fun removeRestoredItemsFromList() {
         val selectedIds = selectionTracker.selection.toSet()
-        trashedItems.removeAll { selectedIds.contains(it.internalId) }
+        trashedItems.removeAll { selectedIds.contains(it.contentId) }
         adapter.updateData(trashedItems)
         selectionTracker.clearSelection()
         imageCountText.text = "0/${trashedItems.size} images selected"
@@ -326,7 +326,7 @@ class RecycleBinFragment : Fragment() {
         selectAllCheckBox.isChecked = selected == total && total > 0
         selectAllCheckBox.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
-                trashedItems.forEach { selectionTracker.select(it.internalId) }
+                trashedItems.forEach { selectionTracker.select(it.contentId) }
             } else {
                 selectionTracker.clearSelection()
             }

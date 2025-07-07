@@ -53,6 +53,12 @@ interface ImageEmbeddingDao {
     @Query("SELECT * FROM image_embeddings")
     suspend fun getAllEmbeddings(): List<ImageEmbedding> // Return type is List of new Entity
 
+    @Query("SELECT * FROM image_embeddings WHERE mediaStoreId = :id LIMIT 1")
+    suspend fun getByMediaStoreId(id: Long): ImageEmbedding?
+
+    @Query("SELECT * FROM image_embeddings WHERE documentUri = :uri LIMIT 1")
+    suspend fun getByDocumentUri(uri: String): ImageEmbedding?
+
     /**
      * Updates an existing ImageEmbedding record in the database.
      * Matches based on the primary key (internalId) of the provided object.
@@ -60,6 +66,8 @@ interface ImageEmbeddingDao {
     @Update
     suspend fun updateImageEmbedding(imageEmbedding: ImageEmbedding) // New method
 
+    @Query("SELECT * FROM image_embeddings WHERE documentUri LIKE :folderUriPrefix || '%'")
+    suspend fun getEmbeddingsByFolderPrefix(folderUriPrefix: String): List<ImageEmbedding>
 
     // --- Keep old methods commented out or remove if no longer needed ---
     // @Query("SELECT * FROM image_embeddings WHERE id = :id LIMIT 1") // Old method based on mediaStoreId PK

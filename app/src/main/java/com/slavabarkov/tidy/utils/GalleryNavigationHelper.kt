@@ -24,7 +24,7 @@ object GalleryNavigationHelper {
             }
         }.toTypedArray()
 
-        val internalIds = items.map { it.internalId }
+        val internalIds = items.map { it.contentId }
         val index = items.indexOf(clickedItem)
 
         return if (index != -1 && imageUris.size == internalIds.size) {

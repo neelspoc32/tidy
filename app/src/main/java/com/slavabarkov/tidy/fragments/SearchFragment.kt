@@ -148,8 +148,11 @@ class SearchFragment : Fragment() {
             if (result.resultCode == Activity.RESULT_OK) {
                 Log.d("SearchFragment", "Delete/Trash permission granted via IntentSender.")
                 val currentSearchResults = mSearchViewModel.searchResults ?: emptyList()
+                Log.d("SearchFragment", "mSearchViewResult ${mSearchViewModel.searchResults?.size} currentSearchResult ${currentSearchResults}" )
                 val remainingIds = currentSearchResults.filter { it !in idsSuccessfullyProcessed }
+                Log.d("SearchFragment","remainingids ${remainingIds.size}")
                 mSearchViewModel.searchResults = remainingIds
+                Log.d("SearchFragment","mSearchViewResult After reaminingids: ${mSearchViewModel.searchResults?.size}")
 
                 // Delete from ViewModel/database
                 lifecycleScope.launch(Dispatchers.IO) {
@@ -457,7 +460,7 @@ class SearchFragment : Fragment() {
         selectAllCheckbox?.setOnClickListener {
             if (selectAllCheckbox?.isChecked == true) {
                 // Select all items
-                val allItemIds = imageAdapter.getDataset().map { it.internalId }.toSet()
+                val allItemIds = imageAdapter.getDataset().map { it.contentId }.toSet()
                 selectionTracker.setItemsSelected(allItemIds, true)
                 Log.d("SelectAll", "Selected all ${allItemIds.size} items.")
             } else {
@@ -474,6 +477,8 @@ class SearchFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         Log.d("LifecycleDebug", "onViewCreated called")
+        // Call your check here
+        checkIndexingStatusOnFirstLaunch()
 
         val recyclerView = view.findViewById<RecyclerView>(R.id.recycler_view)
         val scrollThumb = view.findViewById<View>(R.id.custom_scroll_thumb)
@@ -638,6 +643,19 @@ class SearchFragment : Fragment() {
     }
     // --- END: Observe uiOperationInProgress ---
 
+    private fun checkIndexingStatusOnFirstLaunch() {
+        val isDataAvailable =  mORTImageViewModel.embeddingsList.isNotEmpty() // this should return a boolean synchronously or from LiveData
+
+        Log.d("SearchFragment", "Data. $isDataAvailable")
+
+        if (!isDataAvailable) {
+            Log.d("SearchFragment", "Status: NONE and no data. Showing no-index prompt.")
+                showNoIndexingPromptDialog(Uri.EMPTY)
+        } else {
+            Log.w("SearchFragment", "Data IS available. Process with search view")
+        }
+    }
+
     // --- Add onSaveInstanceState to save tracker state ---
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
@@ -740,9 +758,9 @@ class SearchFragment : Fragment() {
                 val authority = sourceUri.authority
                 if (DocumentsContract.isDocumentUri(requireContext(), sourceUri) ||
                     authority?.contains("com.android.externalstorage.documents") == true) {
-                    documentFileItems.add(Pair(sourceUri, embedding.internalId))
+                    documentFileItems.add(Pair(sourceUri,embedding.contentId))
                 } else if ("media".equals(authority, ignoreCase = true)) {
-                    mediaStoreItems.add(Pair(sourceUri, embedding.internalId))
+                    mediaStoreItems.add(Pair(sourceUri,embedding.contentId))
                 } else {
                     Log.w("SearchFragment", "Unknown URI type in move: $sourceUri")
                 }
@@ -1312,7 +1330,7 @@ class SearchFragment : Fragment() {
     }
 
     private fun initiateMediaStoreDeletion(embeddingsToDelete: List<ImageEmbedding>) {
-        val selectedInternalIds = embeddingsToDelete.map { it.internalId }
+        val selectedInternalIds = embeddingsToDelete.map { it.contentId }
         if (selectedInternalIds.isEmpty()){
             mSearchViewModel.setUiOperationInProgress(false) // Reset if no items
             operationProgressText?.visibility = View.GONE
@@ -1321,7 +1339,7 @@ class SearchFragment : Fragment() {
         val contentResolver = requireContext().contentResolver
 
         val urisAndIdsToDelete = embeddingsToDelete.mapNotNull { embedding ->
-            determineUriFromEmbedding(embedding)?.let { Pair(it, embedding.internalId) }
+            determineUriFromEmbedding(embedding)?.let { Pair(it,embedding.contentId) }
         }
         if (urisAndIdsToDelete.isEmpty()) {
             Log.w("SearchFragment", "Could not resolve URIs for selected internal IDs.")
@@ -1573,11 +1591,16 @@ class SearchFragment : Fragment() {
         val title = "No Images Indexed"
         val messageBuilder = SpannableStringBuilder()
         messageBuilder.append("It looks like you haven't indexed any images yet.\n\n")
-        messageBuilder.append("For the best search results, please index your ")
-        messageBuilder.append(createBoldSpannable("entire photo library")).append(".\n\n")
-        messageBuilder.append("Would you like to go to the indexing screen now?")
+        if(imageUri != Uri.EMPTY) {
+            messageBuilder.append("For the best search results, please index your ")
+            messageBuilder.append(createBoldSpannable("entire photo library")).append(".\n\n")
+            messageBuilder.append("Would you like to go to the indexing screen now?")
+        }
+        else{
+            messageBuilder.append("Please go back to the indexing screen.")
+        }
 
-        AlertDialog.Builder(requireContext())
+        var dialogBuilder = AlertDialog.Builder(requireContext())
             .setTitle(title)
             .setMessage(messageBuilder)
             .setCancelable(false) // Make it modal
@@ -1587,14 +1610,31 @@ class SearchFragment : Fragment() {
                 // Navigate to IndexFragment, indicating a request for full index
                 findNavController().navigate(R.id.action_searchFragment_to_indexFragment) // No specific argument for now, assume IndexFragment default to full
             }
-            .setNegativeButton("Cancel") { dialog, _ ->
-                Log.d("SearchFragment", "User chose 'Cancel' (from no-index prompt).")
-                dialog.dismiss()
-                Toast.makeText(requireContext(), "Shared image search cancelled.", Toast.LENGTH_SHORT).show()
-                requireActivity().finish()
-                // Do not proceed with search
+            if(imageUri != Uri.EMPTY) {
+                dialogBuilder.setNegativeButton("Cancel") { dialog, _ ->
+                    Log.d("SearchFragment", "User chose 'Cancel' (from no-index prompt).")
+                    dialog.dismiss()
+                    Toast.makeText(requireContext(), "Shared image search cancelled.", Toast.LENGTH_SHORT)
+                        .show()
+                    requireActivity().finish()
+                    // Do not proceed with search
+                }
             }
-            .show()
+        else {
+                dialogBuilder.setNegativeButton("Exit") { dialog, _ ->
+                    Log.d("SearchFragment", "User chose to 'Exit' (from no-index prompt).")
+                    dialog.dismiss()
+                    Toast.makeText(
+                        requireContext(),
+                        "Image search cancelled, app closed.",
+                        Toast.LENGTH_SHORT
+                    )
+                        .show()
+                    requireActivity().finish()
+                }
+            }
+
+            dialogBuilder.show()
     }
 
     private fun showIndexingPromptDialog(currentStatus: IndexingScopeStatus, imageUri: Uri) {
@@ -1703,42 +1743,32 @@ class SearchFragment : Fragment() {
     }
 
     // Helper function within SearchFragment
-    private fun getEmbeddingsForIds(internalIds: List<Long>): List<ImageEmbedding> {
-        Log.d("SearchFragment", "getEmbeddingsForIds called. Requesting ${internalIds.size} IDs.")
-        if (internalIds.isEmpty()) {
-            Log.d("SearchFragment", "getEmbeddingsForIds: Requested ID list is empty, returning empty list.")
-            return emptyList() // Return early if no IDs requested
-        }
+    // Returns the ImageEmbedding objects that correspond to the supplied
+// internal‑ID list, preserving the order of that list.
+    private fun getEmbeddingsForIds(idList: List<Long>): List<ImageEmbedding> {
+        val map = mORTImageViewModel.getAllLoadedEmbeddingsMap()
+        // Fast‑exit if nothing is loaded yet
+        if (map.isEmpty() || idList.isEmpty()) return emptyList()
 
-        // Use the map directly from the ViewModel
-        val allEmbeddingsMap = mORTImageViewModel.getAllLoadedEmbeddingsMap()
-        Log.d("SearchFragment", "getEmbeddingsForIds: Current map size in ORTViewModel: ${allEmbeddingsMap.size}")
-        Log.d("SearchFragment", "getEmbeddingsForIds: First 5 requested IDs: ${internalIds.take(5)}")
-
-        // Efficiently map and filter out nulls if any ID wasn't found
-        val results = internalIds.mapNotNull { id ->
-            val embedding = allEmbeddingsMap[id]
-            if (embedding == null && internalIds.size < 20) { // Log misses only for smaller lists to avoid spam
-                Log.w("SearchFragment", "getEmbeddingsForIds: Embedding NOT found in map for ID: $id")
+        return buildList(idList.size) {
+            for (id in idList) {
+                map[id]?.let { add(it) }
             }
-            embedding // mapNotNull filters nulls
         }
-        Log.d("SearchFragment", "getEmbeddingsForIds: Found ${results.size} embeddings out of ${internalIds.size} requested.")
-        return results
     }
 
     // Helper function to determine the URI from an ImageEmbedding object
     private fun determineUriFromEmbedding(embedding: ImageEmbedding): Uri? {
         return when {
-            // Prefer Document URI if available
-            !embedding.documentUri.isNullOrBlank() -> {
-                try { embedding.documentUri.toUri() }
-                catch (e: Exception) { Log.e("SearchFragment", "Error parsing documentUri: ${embedding.documentUri}", e); null }
-            }
             // Fallback to MediaStore ID
             embedding.mediaStoreId != null -> {
                 try { ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, embedding.mediaStoreId) }
                 catch (e: Exception) { Log.e("SearchFragment", "Error creating MediaStore URI for ID: ${embedding.mediaStoreId}", e); null }
+            }
+            // Prefer Document URI if available
+            !embedding.documentUri.isNullOrBlank() -> {
+                try { embedding.documentUri.toUri() }
+                catch (e: Exception) { Log.e("SearchFragment", "Error parsing documentUri: ${embedding.documentUri}", e); null }
             }
             // No usable URI found
             else -> null

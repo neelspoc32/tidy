@@ -2,14 +2,22 @@ package com.slavabarkov.tidy.data
 
 import androidx.room.Entity
 import androidx.room.Ignore
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
+
+@Entity(
+    tableName = "image_embeddings",
+    indices = [
+        Index(value = ["mediaStoreId"],  unique = true),
+        Index(value = ["documentUri"],   unique = true)
+    ]
+)
 
 /**
  * Represents an image embedding stored in the database.
  * It can originate either from the MediaStore or from a user-selected folder via SAF.
  */
-@Entity(tableName = "image_embeddings")
 @TypeConverters(Converters::class)
 data class ImageEmbedding(
     /**
@@ -47,6 +55,14 @@ data class ImageEmbedding(
     @Ignore
     @Transient
     var expiresAt: Long? = null
+
+    /**
+     * A content-based ID to unify mediaStore and documentUri lookup logic.
+     * This should be used for embeddingMap, selection tracker, recycler item ID, etc.
+     */
+    val contentId: Long
+        get() = mediaStoreId ?: documentUri?.hashCode()?.toLong() ?: -1L
+
     // --- Auto-generated equals/hashCode based on all fields ---
     // Note: Default data class equals/hashCode considers all fields, including the embedding array.
     // This might be inefficient if used in Sets/Maps frequently.

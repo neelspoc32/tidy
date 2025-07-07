@@ -15,7 +15,7 @@ class ImageItemKeyProvider(private val adapter: ImageAdapter) : ItemKeyProvider<
     override fun getPosition(key: Long): Int {
         // Find the position in the dataset based on the internalId
         // Use safe access to dataset and handle case where key isn't found
-        val position = adapter.getDataset().indexOfFirst { it.internalId == key }
+        val position = adapter.getDataset().indexOfFirst { it.contentId == key }
         // Log if key not found, can happen during state restoration or data changes
         if (position == -1) {
             Log.w("ItemKeyProvider", "Could not find position for key: $key")

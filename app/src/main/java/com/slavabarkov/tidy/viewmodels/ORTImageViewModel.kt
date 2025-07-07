@@ -1,4 +1,3 @@
-// tidy/app/src/main/java/com/slavabarkov/tidy/viewmodels/ORTImageViewModel.kt
 package com.slavabarkov.tidy.viewmodels
 
 
@@ -9,6 +8,7 @@ import ai.onnxruntime.extensions.OrtxPackage
 import android.annotation.SuppressLint
 import android.app.Application
 import android.content.ContentUris
+import android.content.Context
 import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -54,9 +54,59 @@ enum class IndexingScopeStatus {
     FOLDER_INDEXED // A specific folder has been indexed
 }
 
+// FileUtil.kt
+object FileUtil {
+    fun getPathFromDocumentUri(context: Context, uri: Uri): String? {
+        val projection = arrayOf(MediaStore.Images.Media.DATA)
+        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            val columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+            if (cursor.moveToFirst()) {
+                return cursor.getString(columnIndex)
+            }
+        }
+        return null
+    }
+}
+
+// --- STEP 1: Enums for decision making ---
+enum class DBState {
+    INDEX_ALL,
+    FOLDER_SPECIFIC
+}
+
+enum class NewIndexType {
+    INDEX_ALL,
+    FOLDER_SPECIFIC_SAME,
+    FOLDER_SPECIFIC_DIFFERENT
+}
+
+enum class IndexingOption {
+    OPTION_1_DELETE_AND_REPLACE,
+    OPTION_2_SMART_UPDATE
+}
+
+
+// 2️⃣ DECISION MATRIX -----------------------------------------------------
+fun decideIndexingStrategy(dbState: DBState, newIndexType: NewIndexType): IndexingOption =
+    when (dbState) {
+        DBState.INDEX_ALL -> when (newIndexType) {
+            NewIndexType.INDEX_ALL -> IndexingOption.OPTION_2_SMART_UPDATE
+            NewIndexType.FOLDER_SPECIFIC_SAME, NewIndexType.FOLDER_SPECIFIC_DIFFERENT -> IndexingOption.OPTION_1_DELETE_AND_REPLACE
+        }
+        DBState.FOLDER_SPECIFIC -> when (newIndexType) {
+            NewIndexType.INDEX_ALL -> IndexingOption.OPTION_1_DELETE_AND_REPLACE
+            NewIndexType.FOLDER_SPECIFIC_SAME -> IndexingOption.OPTION_2_SMART_UPDATE
+            NewIndexType.FOLDER_SPECIFIC_DIFFERENT -> IndexingOption.OPTION_1_DELETE_AND_REPLACE
+        }
+    }
+
+
 // ViewModel needs Application context now
 @SuppressLint("StaticFieldLeak")
 class ORTImageViewModel(application: Application) : AndroidViewModel(application) {
+
+    //-- CONFIG --
+    private val enableSkipCheck = true
 
     private val _mProcessingStatus = MutableLiveData(
         ProcessingStatus(isProcessing = true, messageResId = R.string.index_status_initializing)
@@ -90,6 +140,24 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     // Load ONNX model (existing logic - needs try/catch)
     private var ortSession: OrtSession? = null
     private var ortEnv: OrtEnvironment? = null
+
+    // Benchmarking structure
+    data class IndexingStats(
+        val total: Int,
+        val skipped: Int,
+        val processed: Int,
+        val durationMs: Long
+    ) {
+        fun log(context: String = "") {
+            Log.i("ORTIndexingStats", """
+        📊 Indexing Stats${if (context.isNotBlank()) " [$context]" else ""}:
+          • Total Images Scanned: $total
+          • Skipped (Already Indexed): $skipped
+          • ONNX Inferred: $processed
+          • Time Taken: ${durationMs}ms (${durationMs / 1000.0}s)
+        """.trimIndent())
+        }
+    }
 
     init {
         _mProcessingStatus.postValue(
@@ -155,7 +223,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 )
             )
 
-            loadEmbeddingsFromDb()
+            loadEmbeddingsFromDb(null)
 
             finalStatusMsg = if (embeddingsList.isNotEmpty()) R.string.index_status_ready else R.string.index_status_idle
             finalIsProcessing = false
@@ -209,11 +277,80 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+
+    private fun isInMemoryDataReady(): Boolean {
+        return isDataReady.value == true && fullEmbeddingData.isNotEmpty()
+    }
     // *****************************************
+    //--- Revised Start Indexing --- //
+    fun startIndexing(selectedFolder: Uri?) {
+        if (isInMemoryDataReady()) {
+            launchIndexing(selectedFolder)
+        } else {
+            isDataReady.observeForever(object : Observer<Boolean> {
+                override fun onChanged(ready: Boolean?) {
+                    if (ready == true && fullEmbeddingData.isEmpty()) {
+                        isDataReady.removeObserver(this)
+                        launchIndexing(selectedFolder)
+                    }
+                }
+            })
+        }
+    }
 
-    // *** REVISED: Main function to trigger indexing ***
-    fun startIndexing() {
+    // 3️⃣ STATE DETECTORS -----------------------------------------------------
+    private fun getCurrentDBState(): DBState =
+        when (_indexingScopeStatus.value) {
+            IndexingScopeStatus.FOLDER_INDEXED -> DBState.FOLDER_SPECIFIC
+            else -> DBState.INDEX_ALL // FULL_DEVICE_INDEXED or NONE default to "all"
+        }
 
+    private fun getNewIndexType(selectedFolderUri: Uri?): NewIndexType {
+        return when (selectedFolderUri) {
+            null -> NewIndexType.INDEX_ALL
+            else -> {
+                val prevFolder = PreferencesHelper.getSelectedFolderUri(getApplication())
+                if (prevFolder == selectedFolderUri) NewIndexType.FOLDER_SPECIFIC_SAME
+                else NewIndexType.FOLDER_SPECIFIC_DIFFERENT
+            }
+        }
+    }
+
+
+    // 4️⃣ FACTORED CORE INDEXING ---------------------------------------------
+    private suspend fun runIndexingForScope(selectedFolderUri: Uri?): Boolean {
+        return try {
+            if (selectedFolderUri == null) {
+                indexMediaStoreImages()
+                withContext(Dispatchers.Main) {
+                    _indexingScopeStatus.value = IndexingScopeStatus.FULL_DEVICE_INDEXED
+                    PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.FULL_DEVICE_INDEXED)
+                    PreferencesHelper.saveSelectedFolderUri(context, null)
+                    Log.d("ORTImageViewModel", "Indexing Scope Status → FULL_DEVICE_INDEXED")
+                }
+            } else {
+                indexSpecificFolder(selectedFolderUri)
+                withContext(Dispatchers.Main) {
+                    _indexingScopeStatus.value = IndexingScopeStatus.FOLDER_INDEXED
+                    PreferencesHelper.saveSelectedFolderUri(context, selectedFolderUri)
+                    PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.FOLDER_INDEXED)
+                    Log.d("ORTImageViewModel", "Indexing Scope Status → FOLDER_INDEXED [$selectedFolderUri]")
+                }
+            }
+            true
+        } catch (e: Exception) {
+            Log.e("ORTImageViewModel", "Error during scoped indexing", e)
+            _mProcessingStatus.postValue(ProcessingStatus(isProcessing = false, messageResId = R.string.index_status_error))
+            false
+        } finally {
+            // Reload embeddings for UI update
+            loadEmbeddingsFromDb(selectedFolderUri)
+        }
+    }
+
+// 5️⃣ *** REVISED: Main function to trigger indexing ***
+    fun ORTImageViewModel.launchIndexing(selectedFolder: Uri?) {
+        // Guard clauses ------------------------------------------------------
         if (_mProcessingStatus.value?.isProcessing == true) {
             Log.w("ORTImageViewModel", "Indexing already in progress.")
             return
@@ -225,78 +362,52 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         }
 
         viewModelScope.launch(Dispatchers.IO) {
-            _mProcessingStatus.postValue(
-                ProcessingStatus(
-                    isProcessing = true,
-                    messageResId = R.string.index_status_starting
-                )
-            )
-            val selectedFolderUri = PreferencesHelper.getSelectedFolderUri(getApplication())
-            var success = false // Track if indexing completed without major error
+            _mProcessingStatus.postValue(ProcessingStatus(isProcessing = true, messageResId = R.string.index_status_starting))
 
-            try {
-                if (selectedFolderUri == null) {
-                    Log.i(
-                        "ORTImageViewModel",
-                        "No folder selected, indexing all MediaStore images."
-                    )
-                    indexMediaStoreImages() // This function should handle its own final success/error status
-                    // Set status to FULL_DEVICE_INDEXED upon successful full indexing
-                    withContext(Dispatchers.Main) {
-                        _indexingScopeStatus.value = IndexingScopeStatus.FULL_DEVICE_INDEXED
-                        PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.FULL_DEVICE_INDEXED)
-                        Log.d("ORTImageViewModel", "Indexing Scope Status updated to FULL_DEVICE_INDEXED")
-                    }
-                } else {
-                    Log.i("ORTImageViewModel", "Folder selected, indexing: $selectedFolderUri")
-                    indexSpecificFolder(selectedFolderUri) // This function should handle its own final success/error status
-                    // Set status to FOLDER_INDEXED upon successful folder indexing
-                    withContext(Dispatchers.Main) {
-                        _indexingScopeStatus.value = IndexingScopeStatus.FOLDER_INDEXED
-                        PreferencesHelper.saveSelectedFolderUri(context, selectedFolderUri) // Also save folder URI
-                        PreferencesHelper.saveIndexingScopeStatus(context, IndexingScopeStatus.FOLDER_INDEXED)
-                        Log.d("ORTImageViewModel", "Indexing Scope Status updated to FOLDER_INDEXED for URI: $selectedFolderUri")
+            val dbState = getCurrentDBState()
+            val newIndexType = getNewIndexType(selectedFolder)
+            val strategy = decideIndexingStrategy(dbState, newIndexType)
+            Log.i("ORTImageViewModel", "Strategy chosen: $strategy (db=$dbState, new=$newIndexType)")
+
+            when (strategy) {
+                IndexingOption.OPTION_1_DELETE_AND_REPLACE -> {
+                    clearAllEmbeddings { cleared ->
+                        if (!cleared) {
+                            Log.e("ORTImageViewModel", "Failed to clear DB before full reindex.")
+                            _mProcessingStatus.postValue(ProcessingStatus(isProcessing = false, messageResId = R.string.index_status_error))
+                            return@clearAllEmbeddings
+                        }
+                        // Continue with fresh indexing *inside* this callback
+                        viewModelScope.launch(Dispatchers.IO) {
+                            val success = runIndexingForScope(selectedFolder)
+                            finalizeProcessingStatus(success)
+                        }
                     }
                 }
-                success = true // Assume success if no exception bubbles up here
-
-            } catch (e: Exception) {
-                Log.e("ORTImageViewModel", "Error during indexing process", e)
-                _mProcessingStatus.postValue(
-                    ProcessingStatus(
-                        isProcessing = false,
-                        messageResId = R.string.index_status_error
-                    )
-                )
-                success = false
-            } finally {
-                // Load results regardless of success/failure? Or only on success?
-                // Let's load regardless to potentially show partial results
-                Log.d(
-                    "ORTImageViewModel",
-                    "Indexing finished (Success: $success). Loading results from DB."
-                )
-                loadEmbeddingsFromDb()
-                // Final status update moved inside specific indexing functions
-                // Only post idle/ready status if not already handled by specific functions
-                if (_mProcessingStatus.value?.isProcessing == true) { // Check if status wasn't finalized by specific indexer
-                    val finalMsg =
-                        if (idxList.isNotEmpty()) R.string.index_status_ready else R.string.index_status_idle
-                    _mProcessingStatus.postValue(
-                        ProcessingStatus(
-                            isProcessing = false,
-                            messageResId = finalMsg
-                        )
-                    )
+                IndexingOption.OPTION_2_SMART_UPDATE -> {
+                    val success = runIndexingForScope(selectedFolder)
+                    finalizeProcessingStatus(success)
                 }
             }
         }
     }
+
+    // 6️⃣ FINALIZE STATUS HELPER --------------------------------------------
+    private fun finalizeProcessingStatus(success: Boolean) {
+        val finalMsg = if (success && idxList.isNotEmpty()) R.string.index_status_ready else if (success) R.string.index_status_idle else R.string.index_status_error
+        _mProcessingStatus.postValue(ProcessingStatus(isProcessing = false, messageResId = finalMsg))
+    }
+
+
     // *************************************************
 
     // --- Existing MediaStore Indexing Logic (Refactored) ---
     @SuppressLint("Range") // Suppress Range warning as we check indices
     private suspend fun indexMediaStoreImages() {
+        val startTime = System.currentTimeMillis()
+        var skippedImages = 0
+        var processedImages = 0
+
         val context = getApplication<Application>().applicationContext
         val collection =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -307,7 +418,8 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
 
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATE_MODIFIED
+            MediaStore.Images.Media.DATE_MODIFIED,
+            MediaStore.Images.Media.RELATIVE_PATH
         )
 
         var cursor: Cursor? = null
@@ -321,7 +433,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             cursor?.use { // Use 'use' for automatic closing
                 val idColumn = it.getColumnIndex(MediaStore.Images.Media._ID)
                 val dateColumn = it.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
-
+                val pathColumn  = it.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
                 totalImages = it.count
                 _mProcessingStatus.postValue(
                     ProcessingStatus(
@@ -343,14 +455,24 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                         val id = it.getLong(idColumn)
                         currentId = id // Store for finally block
                         val date = it.getLong(dateColumn)
+                        val path = it.getString(pathColumn)
+                        Log.d("ORTImageViewMODEL","Mediastore path ${path}")
                         val contentUri: Uri = ContentUris.withAppendedId(collection, id)
-
-                        processAndSaveEmbedding(
-                            imageUri = contentUri,
-                            mediaStoreImageId = id,
-                            documentUriString = null,
-                            date = date * 1000
-                        )
+                        val shouldSkip = enableSkipCheck && isAlreadyIndexed(id, null)
+                        Log.d("isAlreadyCheck","shouldSkip: $shouldSkip")
+                        if (shouldSkip) {
+                            skippedImages++
+                        } else {
+                            processedImages++
+                            processAndSaveEmbedding(
+                                imageUri = contentUri,
+                                mediaStoreImageId = id,
+                                documentUriString = null,
+                                date = date * 1000,
+                                allowSkip = enableSkipCheck,
+                                path = path
+                            )
+                        }
                         itemProcessedSuccessfully = true // Mark as processed if no exception
 
                     } catch (itemEx: Exception) {
@@ -377,6 +499,14 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                                 maxProgress = totalImages
                             )
                         )
+
+                        val duration = System.currentTimeMillis() - startTime
+                        IndexingStats(
+                            total = skippedImages + processedImages,
+                            skipped = skippedImages,
+                            processed = processedImages,
+                            durationMs = duration
+                        ).log("MediaStore (SkipCheck=$enableSkipCheck)")
                     }
                 }
                 success = true // Mark overall success if loop completes
@@ -388,7 +518,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         } finally {
             Log.d("ORTImageViewModel", "MediaStore indexing loop finished. Success: $success. Processed: $processedCount/$totalImages")
             // Load embeddings from DB AFTER the loop finishes
-            loadEmbeddingsFromDb() // Wait for DB load to complete
+            loadEmbeddingsFromDb(null) // Wait for DB load to complete
             Log.d("ORTImageViewModel", "Embeddings loaded from DB after MediaStore indexing.")
             // Final status update for MediaStore indexing
             val finalMessage =
@@ -407,6 +537,10 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
 
     // *** NEW: Logic for Indexing a Specific Folder using DocumentFile ***
     private suspend fun indexSpecificFolder(folderUri: Uri) {
+        val startTime = System.currentTimeMillis()
+        var skippedImages = 0
+        var processedImages = 0
+
         val context = getApplication<Application>().applicationContext
         var rootDocFile: DocumentFile? = null
         var success = false
@@ -480,16 +614,25 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             imageFiles.forEach { docFile ->
                 var itemProcessedSuccessfully = false // Track success for this specific item
                 try {
+                    val msId = resolveMediaStoreId(context, docFile.uri)
                     val date = docFile.lastModified() // Already in milliseconds
                     val persistentUriString = docFile.uri?.toString() // Get the URI string
 
                     if (docFile.uri != null && persistentUriString != null) {
-                        processAndSaveEmbedding(
-                            imageUri = docFile.uri,
-                            mediaStoreImageId = null,
-                            documentUriString = persistentUriString,
-                            date = date
-                        )
+                        val shouldSkip = enableSkipCheck && isAlreadyIndexed(msId, persistentUriString)
+                        if (shouldSkip) {
+                            skippedImages++
+                        } else {
+                            processedImages++
+                            processAndSaveEmbedding(
+                                imageUri = docFile.uri,
+                                mediaStoreImageId = msId,
+                                documentUriString = persistentUriString,
+                                date = date,
+                                allowSkip = enableSkipCheck,
+                                path = docFile.uri.toString()
+                            )
+                        }
                         itemProcessedSuccessfully = true // Mark as processed if no exception
                     } else {
                         Log.w(
@@ -518,6 +661,13 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                         )
                     )
                     // --- END: Modified Progress Update ---
+                    val duration = System.currentTimeMillis() - startTime
+                    IndexingStats(
+                        total = skippedImages + processedImages,
+                        skipped = skippedImages,
+                        processed = processedImages,
+                        durationMs = duration
+                    ).log("Folder (SkipCheck=$enableSkipCheck)")
                 }
             }
             success = true // Mark overall success if loop completes without major error
@@ -528,7 +678,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         } finally {
             Log.d("ORTImageViewModel", "Folder indexing loop finished. Success: $success. Processed: $processedCount/$totalImages")
             // Load embeddings from DB AFTER the loop finishes
-            loadEmbeddingsFromDb() // Wait for DB load to complete
+            loadEmbeddingsFromDb(folderUri) // Wait for DB load to complete
             Log.d("ORTImageViewModel", "Embeddings loaded from DB after folder indexing.")
             // --- START: Added Final Update ---
             // Final status update specifically for folder indexing
@@ -555,8 +705,16 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         mediaStoreImageId: Long?, // Nullable MediaStore ID
         documentUriString: String?, // Nullable Document URI String
         date: Long,
+        allowSkip: Boolean,
+        path : String
+
     ) {
         val context = getApplication<Application>().applicationContext
+
+        if (allowSkip && isAlreadyIndexed(mediaStoreImageId, documentUriString)) {
+            Log.d("ORTImageViewModel", "Skipping already indexed image: $imageUri")
+            return
+        }
         var inputStream: InputStream? = null
         try {
             inputStream = context.contentResolver.openInputStream(imageUri)
@@ -586,14 +744,15 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             val embedding = getEmbedding(imageTensorBuffer)
 
             // Check if embedding is valid before saving (e.g., not all zeros if that indicates error)
-            if (embedding.any { it != 0f }) { // Basic check if embedding is not all zeros
-                val imageEmbedding = ImageEmbedding(
+            if (embedding.any { it != 0f }) {
+                insertOrUpdateImageEmbedding(
                     mediaStoreId = mediaStoreImageId,
                     documentUri = documentUriString,
                     date = date,
                     embedding = embedding
                 )
-                imageEmbeddingDao.addImageEmbedding(imageEmbedding)
+                bitmap.recycle()
+                croppedBitmap.recycle()
             } else {
                 Log.w(
                     "ORTImageViewModel",
@@ -717,7 +876,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
 
 
     // --- Load Embeddings from DB ---
-    suspend fun loadEmbeddingsFromDb() {
+    suspend fun loadEmbeddingsFromDb(selectedFolder: Uri?) {
         withContext(Dispatchers.IO) { // Ensure DB access is on IO thread
             try {
                 Log.d("ORTImageViewModel", "Loading embeddings from DB...")
@@ -726,9 +885,23 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 // Post updates to LiveData or StateFlow from Main thread if needed for UI observers
                 // For internal lists, update directly here on IO thread is fine
                 embeddingsList = allEmbeddingsData.map { it.embedding }
-                idxList = allEmbeddingsData.map { it.internalId }
-                fullEmbeddingData = allEmbeddingsData
-                embeddingMap = allEmbeddingsData.associateBy { it.internalId }
+                Log.d("ORTImageViewModel", " embeddingsList: ${embeddingsList.size}")
+
+                fullEmbeddingData = if (selectedFolder == null) {
+                    allEmbeddingsData
+                } else {
+                    imageEmbeddingDao.getEmbeddingsByFolderPrefix(selectedFolder.toString())
+                }
+                Log.d("ORTImageViewModel", "selectedFolder: ${selectedFolder == null} fullEmbeddingData: ${fullEmbeddingData.size}")
+                Log.d("isAlreadyCheck","Inside load embeddings db , fullembeddingData size: ${fullEmbeddingData.size}")
+                embeddingMap = fullEmbeddingData.associateBy { it.mediaStoreId ?: it.documentUri.hashCode().toLong() }
+                Log.d("ORTImageViewModel", "embeddingMap: ${embeddingMap.size}")
+                idxList = embeddingMap.keys.toList()
+                Log.d("ORTImageViewModel", " idxList: ${idxList.size}")
+                withContext(Dispatchers.Main) {
+                    _isDataReady.value = true
+                    Log.d("ORTImageViewModel", "embeddingMap inside data ready: ${embeddingMap.size}")
+                }
                 //_isDataReady.postValue(true)
 
 
@@ -778,6 +951,78 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     // --- End Load Embeddings ---
 
 
+    private suspend fun isAlreadyIndexed(mediaStoreId: Long?, documentUri: String?): Boolean {
+        val isMemoryReady = isInMemoryDataReady()
+        Log.d("isAlreadyCheck", "MemoryReady=$isMemoryReady | fullSize=${fullEmbeddingData.size}")
+
+        return if (isMemoryReady) {
+            Log.d("isAlreadyCheck","Inside Memory Ready fullembeddingsize: ${fullEmbeddingData.size}")
+            fullEmbeddingData.any { existing ->
+                Log.d("isAlreadyCheck","mediastoreid: ${existing.mediaStoreId} documentid: ${existing.documentUri}")
+                (mediaStoreId != null && existing.mediaStoreId == mediaStoreId) ||
+                        (documentUri != null && existing.documentUri == documentUri)
+            }
+        } else {
+            // Fallback to DB
+            Log.d("isAlreadyCheck","Inside Fallback")
+            when {
+                mediaStoreId != null -> imageEmbeddingDao.getByMediaStoreId(mediaStoreId) != null
+                documentUri != null -> imageEmbeddingDao.getByDocumentUri(documentUri) != null
+                else -> false
+            }
+        }
+    }
+
+    private suspend fun insertOrUpdateImageEmbedding(
+        mediaStoreId: Long?,
+        documentUri: String?,
+        date: Long,
+        embedding: FloatArray
+    ) {
+        val existing = when {
+            mediaStoreId != null ->
+                imageEmbeddingDao.getByMediaStoreId(mediaStoreId)
+                    ?: documentUri?.let { imageEmbeddingDao.getByDocumentUri(it) } // Cross check fallback
+            documentUri != null -> imageEmbeddingDao.getByDocumentUri(documentUri)
+            else -> null
+        }
+
+        if (existing != null) {
+            // Update the existing embedding, filling in any missing ID
+            val updated = existing.copy(
+                embedding = embedding,
+                date = date,
+                mediaStoreId = mediaStoreId ?: existing.mediaStoreId,
+                documentUri = documentUri ?: existing.documentUri
+            )
+            imageEmbeddingDao.updateImageEmbedding(updated)
+        } else {
+            // Insert new embedding
+            val newEmbedding = ImageEmbedding(
+                mediaStoreId = mediaStoreId,
+                documentUri = documentUri,
+                date = date,
+                embedding = embedding
+            )
+            imageEmbeddingDao.addImageEmbedding(newEmbedding)
+        }
+    }
+
+    private fun resolveMediaStoreId(context: Context, docUri: Uri): Long? {
+        val realPath = FileUtil.getPathFromDocumentUri(context, docUri) ?: return null
+        val projection = arrayOf(MediaStore.Images.Media._ID)
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            "${MediaStore.Images.Media.DATA} = ?",
+            arrayOf(realPath),
+            null
+        )?.use { c ->
+            return if (c.moveToFirst()) c.getLong(0) else null
+        }
+        return null
+    }
+
     override fun onCleared() {
         super.onCleared()
         // Release ORT resources
@@ -806,9 +1051,10 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 Log.d("ORTImageViewModel", "DB deletion successful.")
 
                 // Update internal lists and map (important!)
-                fullEmbeddingData = fullEmbeddingData.filter { it.internalId !in internalIds }
-                embeddingMap = fullEmbeddingData.associateBy { it.internalId }
-                idxList = fullEmbeddingData.map { it.internalId }
+                fullEmbeddingData = fullEmbeddingData.filter { it.contentId !in internalIds }
+                embeddingMap = fullEmbeddingData.associateBy { it.contentId }
+                idxList = embeddingMap.keys.toList()
+                Log.d("ORTImageViewModel", " idxList: ${idxList.size}")
                 embeddingsList = fullEmbeddingData.map { it.embedding }
                 Log.d("ORTImageViewModel", "Internal lists updated. New count: ${idxList.size}")
 

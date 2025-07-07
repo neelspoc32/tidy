@@ -193,14 +193,9 @@ class IndexFragment : Fragment() {
             // Check permission before starting
             if (hasStoragePermission()) {
                 Toast.makeText(context, R.string.clearing_previous_index, Toast.LENGTH_SHORT).show()
-                mORTImageViewModel.clearAllEmbeddings { success ->
-                    if (success) {
-                        Toast.makeText(context, R.string.starting_new_index, Toast.LENGTH_SHORT).show()
-                        mORTImageViewModel.startIndexing()
-                    } else {
-                        Toast.makeText(context, R.string.error_clearing_index, Toast.LENGTH_LONG).show()
-                    }
-                }
+                val currentFolderUri = PreferencesHelper.getSelectedFolderUri(requireContext())
+                Toast.makeText(context, R.string.starting_new_index, Toast.LENGTH_SHORT).show()
+                mORTImageViewModel.startIndexing(currentFolderUri)
             } else {
                 Toast.makeText(context, "Storage permission needed to start indexing.", Toast.LENGTH_LONG).show()
                 requestAppropriatePermission() // Request permission again if button clicked without it

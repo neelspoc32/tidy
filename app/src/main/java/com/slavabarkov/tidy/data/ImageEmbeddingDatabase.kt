@@ -10,7 +10,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
-@Database(entities = [ImageEmbedding::class], version = 2, exportSchema = false) // <-- Incremented version
+@Database(entities = [ImageEmbedding::class], version = 3, exportSchema = false) // <-- Incremented version
 @TypeConverters(Converters::class)
 abstract class ImageEmbeddingDatabase : RoomDatabase() {
     abstract fun imageEmbeddingDao(): ImageEmbeddingDao

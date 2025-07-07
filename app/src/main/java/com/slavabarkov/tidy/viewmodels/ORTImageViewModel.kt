@@ -895,13 +895,9 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 Log.d("ORTImageViewModel", "selectedFolder: ${selectedFolder == null} fullEmbeddingData: ${fullEmbeddingData.size}")
                 Log.d("isAlreadyCheck","Inside load embeddings db , fullembeddingData size: ${fullEmbeddingData.size}")
                 embeddingMap = fullEmbeddingData.associateBy { it.mediaStoreId ?: it.documentUri.hashCode().toLong() }
-                Log.d("ORTImageViewModel", "embeddingMap: ${embeddingMap.size}")
+                Log.d("ORTImageViewModel", "EmbeddingMap: ${embeddingMap.size}")
                 idxList = embeddingMap.keys.toList()
                 Log.d("ORTImageViewModel", " idxList: ${idxList.size}")
-                withContext(Dispatchers.Main) {
-                    _isDataReady.value = true
-                    Log.d("ORTImageViewModel", "embeddingMap inside data ready: ${embeddingMap.size}")
-                }
                 //_isDataReady.postValue(true)
 
 

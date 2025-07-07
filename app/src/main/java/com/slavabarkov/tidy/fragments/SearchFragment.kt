@@ -68,6 +68,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.net.toUri
 import androidx.core.view.MenuProvider
 import androidx.documentfile.provider.DocumentFile
+import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import com.slavabarkov.tidy.data.ImageEmbedding
@@ -477,8 +478,6 @@ class SearchFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         Log.d("LifecycleDebug", "onViewCreated called")
-        // Call your check here
-        checkIndexingStatusOnFirstLaunch()
 
         val recyclerView = view.findViewById<RecyclerView>(R.id.recycler_view)
         val scrollThumb = view.findViewById<View>(R.id.custom_scroll_thumb)
@@ -639,6 +638,10 @@ class SearchFragment : Fragment() {
                 }
             }
 
+        }
+        else{
+            // Call your check here
+            checkIndexingStatusOnFirstLaunch()
         }
     }
     // --- END: Observe uiOperationInProgress ---
@@ -1595,9 +1598,11 @@ class SearchFragment : Fragment() {
             messageBuilder.append("For the best search results, please index your ")
             messageBuilder.append(createBoldSpannable("entire photo library")).append(".\n\n")
             messageBuilder.append("Would you like to go to the indexing screen now?")
+            Log.d("SearchFragment","Inside Share Images Indexed")
         }
         else{
             messageBuilder.append("Please go back to the indexing screen.")
+            Log.d("SearchFragment","Inside Direct Images Indexed")
         }
 
         var dialogBuilder = AlertDialog.Builder(requireContext())
@@ -1608,7 +1613,17 @@ class SearchFragment : Fragment() {
                 Log.d("SearchFragment", "User chose 'Go to Indexing' (from no-index prompt).")
                 dialog.dismiss()
                 // Navigate to IndexFragment, indicating a request for full index
-                findNavController().navigate(R.id.action_searchFragment_to_indexFragment) // No specific argument for now, assume IndexFragment default to full
+                //findNavController().navigate(R.id.action_searchFragment_to_indexFragment) // No specific argument for now, assume IndexFragment default to full
+                val navOpts = NavOptions.Builder()
+                    .setPopUpTo(R.id.searchFragment, /*inclusive =*/ true) // remove SearchFragment
+                    .setLaunchSingleTop(true)                                // optional, avoids duplicates
+                    .build()
+
+                findNavController().navigate(
+                    R.id.action_searchFragment_to_indexFragment,
+                    null,
+                    navOpts
+                )
             }
             if(imageUri != Uri.EMPTY) {
                 dialogBuilder.setNegativeButton("Cancel") { dialog, _ ->

@@ -10,7 +10,8 @@ object GalleryNavigationHelper {
     fun buildGalleryArgs(
         items: List<ImageEmbedding>,
         clickedItem: ImageEmbedding,
-        selectedIds: Set<Long> = emptySet()
+        selectedIds: Set<Long> = emptySet(),
+        isFromRecycleBin : Boolean
     ): Bundle? {
         val imageUris = items.mapNotNull { emb ->
             when {
@@ -32,7 +33,8 @@ object GalleryNavigationHelper {
                 "imageUris" to imageUris,
                 "internalIds" to internalIds.toLongArray(),
                 "startIndex" to index,
-                "selectionModeEnabled" to selectedIds.isNotEmpty()
+                "selectionModeEnabled" to selectedIds.isNotEmpty(),
+                "isFromRecycleBin" to isFromRecycleBin
             )
         } else null
     }

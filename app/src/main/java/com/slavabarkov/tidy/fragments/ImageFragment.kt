@@ -39,7 +39,7 @@ class ImageFragment : Fragment() {
     // Store the received URI string and internalId
     private var imageUriString: String? = null
     private var internalId: Long? = null // Using the new internal DB ID
-
+    private var isFromRecycleBin: Boolean = false
     // Keep ViewModels
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
@@ -62,6 +62,7 @@ class ImageFragment : Fragment() {
         // The key "imageUriString" MUST match the <argument> name in navigation.xml
         imageUriString = args.getString("imageUriString", "")
         Log.d("ImageFragment", "Received internalId: $internalId, URI string: $imageUriString")
+        isFromRecycleBin = args.getBoolean("isFromRecycleBin",false)
         // --- END: Argument Retrieval ---
 
         // Basic validation
@@ -165,7 +166,8 @@ class ImageFragment : Fragment() {
 
         // --- Button Logic ---
         val buttonImage2Image: Button = view.findViewById(R.id.buttonImage2Image)
-        val openedFromRecycleBin = internalId?.let { it < 0 } == true
+        var imageEmbedding = mORTImageViewModel.getAllLoadedEmbeddingsMap()[internalId]
+        val openedFromRecycleBin = isFromRecycleBin || (imageEmbedding?.expiresAt != null)
         buttonImage2Image.visibility = if (openedFromRecycleBin) View.GONE else View.VISIBLE
         buttonImage2Image.setOnClickListener {
             Log.d("ImageFragment", "Image2Image button clicked for internalId: $internalId") // Log ID being used

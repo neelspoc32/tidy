@@ -85,9 +85,13 @@ override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHold
         }
 
         // Use the stable internalId for selection tracking
+
         val itemStableId = itemEmbedding.contentId
         // --- Determine the correct URI to load ---
-        val imageUriToLoad: Uri? = when {
+        if(itemStableId < 0) {
+            Log.d("AdapterDebug", "$itemStableId")
+        }
+            val imageUriToLoad: Uri? = when {
             !itemEmbedding.documentUri.isNullOrBlank() -> {
                 try {
                     itemEmbedding.documentUri.toUri() // Parse the stored String URI

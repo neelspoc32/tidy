@@ -22,7 +22,7 @@ class FullScreenGalleryFragment : Fragment() {
     private var startIndex: Int = 0
     private var selectionModeEnabled: Boolean = false
     private var currentIndex = 0
-
+    private var isFromRecycleBin = false
     private lateinit var indicatorView: PageIndicatorView
 
     private val fadeOutRunnable = Runnable {
@@ -49,6 +49,7 @@ class FullScreenGalleryFragment : Fragment() {
             internalIds = it.getLongArray("internalIds")?.toList() ?: emptyList()
             startIndex = it.getInt("startIndex", 0)
             selectionModeEnabled = it.getBoolean("selectionModeEnabled", false)
+            isFromRecycleBin = it.getBoolean("isFromRecycleBin",false)
         }
     }
 
@@ -80,6 +81,7 @@ class FullScreenGalleryFragment : Fragment() {
                         putString("imageUriString", imageUris[position])
                         putLong("internalId", internalIds[position])
                         putBoolean("selectionModeEnabled", selectionModeEnabled)
+                        putBoolean("isFromRecycleBin",isFromRecycleBin)
                     }
                 }
             }
@@ -187,6 +189,13 @@ class FullScreenGalleryFragment : Fragment() {
             .start()
         // Schedule fade-out
         indicatorView.postDelayed(fadeOutRunnable, 3000)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        findNavController().previousBackStackEntry
+            ?.savedStateHandle
+            ?.set("scrollToIndex", currentIndex)
     }
 
     override fun onDestroyView() {

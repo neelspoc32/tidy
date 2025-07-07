@@ -387,7 +387,8 @@ class SearchFragment : Fragment() {
                 val bundle = GalleryNavigationHelper.buildGalleryArgs(
                     getEmbeddingsForIds(mSearchViewModel.searchResults ?: emptyList()),
                     clickedItem,
-                    selectedIds = mSearchViewModel.selectedItemIds.value ?: emptySet()
+                    selectedIds = mSearchViewModel.selectedItemIds.value ?: emptySet(),
+                    isFromRecycleBin = false
                 )
                 bundle?.let {
                     findNavController().navigate(
@@ -395,6 +396,8 @@ class SearchFragment : Fragment() {
                         it
                     )
                 }
+
+
             },
             isFromRecycleBin = false
         )
@@ -606,7 +609,7 @@ class SearchFragment : Fragment() {
             }
         }
 
-        findNavController().currentBackStackEntry
+        findNavController().previousBackStackEntry
             ?.savedStateHandle
             ?.getLiveData<Int>("scrollToIndex")
             ?.observe(viewLifecycleOwner) { index ->

@@ -74,6 +74,7 @@
         <argument android:name="imageUris" app:argType="string[]" />
         <argument android:name="internalIds" app:argType="long[]" />
         <argument android:name="startIndex" app:argType="integer" />
+        <argument android:name="isFromRecycleBin" app:argType="boolean" />
         <argument android:name="selectionModeEnabled" app:argType="boolean" android:defaultValue="false" />
     </fragment>
 

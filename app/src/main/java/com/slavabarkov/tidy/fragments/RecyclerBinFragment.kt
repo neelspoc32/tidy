@@ -88,7 +88,8 @@ class RecycleBinFragment : Fragment() {
             val bundle = GalleryNavigationHelper.buildGalleryArgs(
                 trashedItems,
                 image,
-                selectedIds = mRecycleBinVM.selectedItemIds.value ?: emptySet()
+                selectedIds = mRecycleBinVM.selectedItemIds.value ?: emptySet(),
+                isFromRecycleBin = true
             )
 
             if (bundle != null) {

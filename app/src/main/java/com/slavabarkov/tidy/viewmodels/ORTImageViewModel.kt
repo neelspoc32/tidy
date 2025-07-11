@@ -91,7 +91,8 @@ fun decideIndexingStrategy(dbState: DBState, newIndexType: NewIndexType): Indexi
     when (dbState) {
         DBState.INDEX_ALL -> when (newIndexType) {
             NewIndexType.INDEX_ALL -> IndexingOption.OPTION_2_SMART_UPDATE
-            NewIndexType.FOLDER_SPECIFIC_SAME, NewIndexType.FOLDER_SPECIFIC_DIFFERENT -> IndexingOption.OPTION_1_DELETE_AND_REPLACE
+            NewIndexType.FOLDER_SPECIFIC_SAME,
+            NewIndexType.FOLDER_SPECIFIC_DIFFERENT -> IndexingOption.OPTION_1_DELETE_AND_REPLACE
         }
         DBState.FOLDER_SPECIFIC -> when (newIndexType) {
             NewIndexType.INDEX_ALL -> IndexingOption.OPTION_1_DELETE_AND_REPLACE
@@ -125,7 +126,6 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     // LiveData to hold the current indexing scope status
     private val _indexingScopeStatus = MutableLiveData<IndexingScopeStatus>()
     val indexingScopeStatus: LiveData<IndexingScopeStatus> get() = _indexingScopeStatus
-
     private val context = application.applicationContext
     // --- Database Access ---
     private val db = Room.databaseBuilder(
@@ -426,7 +426,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         var success = false
         var totalImages = 0
         var processedCount = 0
-
+        val mediastoreids = mutableListOf<Long>()  // Store ID for logging in finally
         try {
             cursor = context.contentResolver.query(collection, projection, null, null, null)
 
@@ -446,14 +446,13 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
 
                 while (it.moveToNext()) {
                     var itemProcessedSuccessfully = false // Track success for this specific item
-                    var currentId : Long? = null // Store ID for logging in finally
                     try {
                         if (idColumn == -1 || dateColumn == -1) {
                             Log.e("ORTImageViewModel", "Required MediaStore columns not found.")
                             continue // Skip this item
                         }
                         val id = it.getLong(idColumn)
-                        currentId = id // Store for finally block
+                        mediastoreids.add(id)
                         val date = it.getLong(dateColumn)
                         val path = it.getString(pathColumn)
                         Log.d("ORTImageViewMODEL","Mediastore path ${path}")
@@ -520,6 +519,23 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             // Load embeddings from DB AFTER the loop finishes
             loadEmbeddingsFromDb(null) // Wait for DB load to complete
             Log.d("ORTImageViewModel", "Embeddings loaded from DB after MediaStore indexing.")
+            // Deleting stale embeddings of images not present in the Phone anymore.
+            withContext(Dispatchers.IO){
+                val tobeDeletedList = fullEmbeddingData.filterNot { embedding ->
+                    mediastoreids.any { id ->
+                        embedding.mediaStoreId != null && id == embedding.mediaStoreId
+
+                    }
+                }.map { it.internalId }
+                Log.d("ORTImageViewModel","Inside Index ALL - Embeddings to delete ${tobeDeletedList}")
+                try{
+                    deleteEmbeddingsByInternalId(tobeDeletedList)
+                    val message= "Inside Index ALL - Successfullyremoved stale embeddings"
+                    Log.d("ORTImageViewModel",message)
+                }catch(e:Exception){
+                    Log.e("OrtImageViewModel","Deleting unsynced embeddings failed",e)
+                }
+            }
             // Final status update for MediaStore indexing
             val finalMessage =
                 if (success) R.string.index_status_complete else R.string.index_status_error
@@ -546,7 +562,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         var success = false
         var totalImages = 0
         var processedCount = 0
-
+        val imageFiles = mutableListOf<DocumentFile>()
         try {
             rootDocFile = DocumentFile.fromTreeUri(context, folderUri)
 
@@ -560,8 +576,6 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 )
                 return // Exit early if folder is invalid
             }
-
-            val imageFiles = mutableListOf<DocumentFile>()
 
             // Recursive function to find all image files
             suspend fun findImageFiles(directory: DocumentFile) {
@@ -680,6 +694,27 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             // Load embeddings from DB AFTER the loop finishes
             loadEmbeddingsFromDb(folderUri) // Wait for DB load to complete
             Log.d("ORTImageViewModel", "Embeddings loaded from DB after folder indexing.")
+            // Deleting stale embeddings of images not present in the Phone anymore.
+            withContext(Dispatchers.IO){
+                val tobeDeletedList = fullEmbeddingData.filterNot { embedding ->
+                    imageFiles.any { file ->
+                        val fileUriStr = file.uri?.toString()
+                        val mediaIdMatch = embedding.mediaStoreId != null && resolveMediaStoreId(context, file.uri) == embedding.mediaStoreId
+                        val uriMatch = embedding.documentUri != null && fileUriStr == embedding.documentUri
+                        mediaIdMatch || uriMatch
+                    }
+                }.map { it.internalId }
+               //var tobeDeletedList = fullEmbeddingData.filterIndexed{index, i -> i.documentUri == imageFiles[index].uri?.toString()}.map{it.internalId}
+                Log.d("ORTImageViewModel","Inside Index Folder - Embeddings to delete ${tobeDeletedList}")
+                try{
+                    deleteEmbeddingsByInternalId(tobeDeletedList)
+                    val message= "Inside Index Folder - Successfullyremoved stale embeddings"
+
+                   Log.d("ORTImageViewModel",message)
+                }catch(e:Exception){
+                    Log.e("OrtImageViewModel","Deleting unsynced embeddings failed",e)
+                }
+            }
             // --- START: Added Final Update ---
             // Final status update specifically for folder indexing
             val finalMessage =
@@ -899,7 +934,6 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 idxList = embeddingMap.keys.toList()
                 Log.d("ORTImageViewModel", " idxList: ${idxList.size}")
                 //_isDataReady.postValue(true)
-
 
                 withContext(Dispatchers.Main) {
                     _isDataReady.value = true

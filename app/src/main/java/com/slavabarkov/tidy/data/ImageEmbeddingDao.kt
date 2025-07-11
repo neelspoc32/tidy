@@ -69,6 +69,18 @@ interface ImageEmbeddingDao {
     @Query("SELECT * FROM image_embeddings WHERE documentUri LIKE :folderUriPrefix || '%'")
     suspend fun getEmbeddingsByFolderPrefix(folderUriPrefix: String): List<ImageEmbedding>
 
+    /**
+     * Retrieves all images based on their sync status
+     */
+    @Query("SELECT * FROM image_embeddings WHERE syncStat LIKE :syncState")
+    suspend fun getBySyncStats(syncState: String): List<ImageEmbedding>
+
+    @Query("UPDATE image_embeddings SET syncStat = :newSyncState WHERE syncStat = :oldSyncState")
+    suspend fun updateSyncStatusByOldStatus(newSyncState: String, oldSyncState: String): Int // Returns number of rows updated
+
+    @Query("DELETE FROM image_embeddings WHERE syncStat = :syncState")
+    suspend fun deleteBySyncStatus(syncState: String): Int // Returns the number of rows deleted
+
     // --- Keep old methods commented out or remove if no longer needed ---
     // @Query("SELECT * FROM image_embeddings WHERE id = :id LIMIT 1") // Old method based on mediaStoreId PK
     // suspend fun getRecord(id: Long): ImageEmbedding?

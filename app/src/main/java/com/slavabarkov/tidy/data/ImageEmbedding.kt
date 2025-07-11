@@ -51,6 +51,10 @@ data class ImageEmbedding(
      * The actual embedding vector for the image.
      */
     val embedding: FloatArray,
+    /**
+     * The flag is used to check if the embeddings are in sync with images in phone, and make sure the non-existing images are deleted
+     */
+    var syncStat: String = "New"
 ) {
     @Ignore
     @Transient

@@ -225,7 +225,7 @@ class SearchFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         Log.d("SearchFragment", "onResume called.")
-
+        mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
         // Get the current master list of IDs and the map from ORTViewModel
         val masterIdList = mORTImageViewModel.idxList
         val masterEmbeddingMap = mORTImageViewModel.getAllLoadedEmbeddingsMap()
